@@ -25,9 +25,10 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -75,6 +76,7 @@ fun CanvasWorkspaceScreen(
 
     var showMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
 
     // Launcher for PDF file selection
@@ -290,7 +292,15 @@ fun CanvasWorkspaceScreen(
                                 }
                             }
                         )
-                        Divider()
+                        DropdownMenuItem(
+                            text = { Text("Canvas & Palm Settings") },
+                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) },
+                            onClick = {
+                                showMenu = false
+                                showSettingsDialog = true
+                            }
+                        )
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("Clear Page", color = MaterialTheme.colorScheme.error) },
                             leadingIcon = { Icon(Icons.Default.CleaningServices, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp)) },
@@ -304,12 +314,21 @@ fun CanvasWorkspaceScreen(
             }
         }
 
-        // 3. Floating Draggable Tool Palette
+        // 3. Floating Draggable Tool Palette (Supports Horizontal & Vertical dock)
         FloatingToolPalette(
             state = state,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp)
+                .padding(bottom = 24.dp),
+            onOpenSettings = { showSettingsDialog = true }
+        )
+    }
+
+    // Canvas Settings Dialog
+    if (showSettingsDialog) {
+        CanvasSettingsDialog(
+            state = state,
+            onDismiss = { showSettingsDialog = false }
         )
     }
 

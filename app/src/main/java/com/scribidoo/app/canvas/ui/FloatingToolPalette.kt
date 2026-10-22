@@ -1,44 +1,40 @@
 package com.scribidoo.app.canvas.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoFixHigh
-import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CropSquare
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FitScreen
-import androidx.compose.material.icons.filled.FormatColorFill
-import androidx.compose.material.icons.filled.Gesture
-import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.ModeEdit
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -58,25 +54,32 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.res.painterResource
-import com.scribidoo.app.R
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.scribidoo.app.R
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.model.DrawingTool
 import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.state.CanvasState
 import kotlin.math.roundToInt
 
+enum class ToolbarOrientation {
+    HORIZONTAL,
+    VERTICAL
+}
+
 @Composable
 fun FloatingToolPalette(
     state: CanvasState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenSettings: () -> Unit = {}
 ) {
+    var orientation by remember { mutableStateOf(ToolbarOrientation.HORIZONTAL) }
     var offsetX by remember { mutableFloatStateOf(40f) }
     var offsetY by remember { mutableFloatStateOf(40f) }
 
@@ -93,380 +96,485 @@ fun FloatingToolPalette(
         Color(0xFFF59E0B)  // Highlighter Amber / Yellow
     )
 
+    val dragModifier = Modifier.pointerInput(Unit) {
+        detectDragGestures { change, dragAmount ->
+            change.consume()
+            offsetX += dragAmount.x
+            offsetY += dragAmount.y
+        }
+    }
+
     Surface(
         modifier = modifier
             .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
             .shadow(elevation = 12.dp, shape = RoundedCornerShape(24.dp))
-            .border(1.dp, Color(0x1F000000), RoundedCornerShape(24.dp))
-            .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    offsetX += dragAmount.x
-                    offsetY += dragAmount.y
-                }
-            },
+            .border(1.dp, Color(0x1F000000), RoundedCornerShape(24.dp)),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         tonalElevation = 8.dp
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Top subtle pill drag handle
-            Box(
-                modifier = Modifier
-                    .padding(bottom = 5.dp)
-                    .width(42.dp)
-                    .height(4.dp)
-                    .background(
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                        RoundedCornerShape(2.dp)
-                    )
-            )
-
-            // Main tool buttons row (horizontally scrollable on narrower phone screens)
-            val scrollState = rememberScrollState()
-            Row(
-                modifier = Modifier.horizontalScroll(scrollState),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+        if (orientation == ToolbarOrientation.HORIZONTAL) {
+            // Horizontal Layout (Bottom/Top bar)
+            Column(
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Tactile side drag handle grip
+                // Top subtle pill drag handle
                 Box(
                     modifier = Modifier
-                        .padding(start = 4.dp, end = 6.dp)
-                        .size(width = 14.dp, height = 30.dp),
+                        .then(dragModifier)
+                        .padding(bottom = 5.dp)
+                        .width(48.dp)
+                        .height(10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(20.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                                    RoundedCornerShape(1.5.dp)
-                                )
-                        )
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(20.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                                    RoundedCornerShape(1.5.dp)
-                                )
-                        )
-                    }
-                }
-
-                // Pen Tool
-                ToolButton(
-                    icon = Icons.Default.ModeEdit,
-                    label = "Pen",
-                    isSelected = state.currentTool == DrawingTool.PEN,
-                    onClick = { state.currentTool = DrawingTool.PEN }
-                )
-
-                // Highlighter Tool (Chisel-Tip Marker)
-                ToolButton(
-                    painter = painterResource(id = R.drawable.ic_highlighter_marker),
-                    label = "Highlighter Marker",
-                    isSelected = state.currentTool == DrawingTool.HIGHLIGHTER,
-                    onClick = { state.currentTool = DrawingTool.HIGHLIGHTER }
-                )
-
-                // Rubber Eraser Tool (Click switches between Whole Stroke and Precision Segment eraser)
-                val isSegmentEraser = state.currentTool == DrawingTool.SEGMENT_ERASER
-                val isEraserActive = state.currentTool == DrawingTool.STROKE_ERASER || isSegmentEraser
-                ToolButton(
-                    painter = painterResource(
-                        id = if (isSegmentEraser) R.drawable.ic_eraser_precision else R.drawable.ic_eraser_stroke
-                    ),
-                    label = if (isSegmentEraser) "Precision Segment Eraser" else "Stroke Eraser",
-                    isSelected = isEraserActive,
-                    onClick = {
-                        state.currentTool = if (state.currentTool == DrawingTool.STROKE_ERASER) {
-                            DrawingTool.SEGMENT_ERASER
-                        } else {
-                            DrawingTool.STROKE_ERASER
-                        }
-                    }
-                )
-
-                // Shapes Tool
-                Box {
-                    ToolButton(
-                        icon = Icons.Default.CropSquare,
-                        label = "Shapes",
-                        isSelected = state.currentTool == DrawingTool.SHAPE,
-                        onClick = {
-                            state.currentTool = DrawingTool.SHAPE
-                            showShapeMenu = !showShapeMenu
-                        }
-                    )
-                    DropdownMenu(
-                        expanded = showShapeMenu,
-                        onDismissRequest = { showShapeMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Rectangle") },
-                            onClick = {
-                                state.currentShapeType = ShapeType.RECTANGLE
-                                state.currentTool = DrawingTool.SHAPE
-                                showShapeMenu = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Ellipse / Circle") },
-                            onClick = {
-                                state.currentShapeType = ShapeType.ELLIPSE
-                                state.currentTool = DrawingTool.SHAPE
-                                showShapeMenu = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Line") },
-                            onClick = {
-                                state.currentShapeType = ShapeType.LINE
-                                state.currentTool = DrawingTool.SHAPE
-                                showShapeMenu = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Arrow") },
-                            onClick = {
-                                state.currentShapeType = ShapeType.ARROW
-                                state.currentTool = DrawingTool.SHAPE
-                                showShapeMenu = false
-                            }
-                        )
-                    }
-                }
-
-                // Text Box Tool
-                ToolButton(
-                    icon = Icons.Default.TextFields,
-                    label = "Text Box",
-                    isSelected = state.currentTool == DrawingTool.TEXT,
-                    onClick = { state.currentTool = DrawingTool.TEXT }
-                )
-
-                Box(
-                    modifier = Modifier
-                        .height(28.dp)
-                        .width(1.dp)
-                        .background(Color(0x1F000000))
-                )
-
-                // Color Swatch Button
-                Box {
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(state.currentColor)
-                            .border(2.dp, Color.White, CircleShape)
-                            .border(3.dp, Color(0x33000000), CircleShape)
-                            .clickable { showColorMenu = !showColorMenu }
-                    )
-                    DropdownMenu(
-                        expanded = showColorMenu,
-                        onDismissRequest = { showColorMenu = false }
-                    ) {
-                        Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            presetColors.forEach { color ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(color)
-                                        .border(
-                                            width = if (state.currentColor == color) 3.dp else 1.dp,
-                                            color = if (state.currentColor == color) MaterialTheme.colorScheme.primary else Color(0x33000000),
-                                            shape = CircleShape
-                                        )
-                                        .clickable {
-                                            state.currentColor = color
-                                            showColorMenu = false
-                                        }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Stroke Width Indicator & Menu
-                Box {
-                    IconButton(
-                        onClick = { showWidthMenu = !showWidthMenu },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(state.currentStrokeWidth.coerceIn(3f, 16f).dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.onSurface)
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = showWidthMenu,
-                        onDismissRequest = { showWidthMenu = false }
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp).width(160.dp)) {
-                            Text("Stroke Width: ${state.currentStrokeWidth.toInt()} px", fontSize = 12.sp)
-                            Slider(
-                                value = state.currentStrokeWidth,
-                                onValueChange = { state.currentStrokeWidth = it },
-                                valueRange = 1f..24f
+                            .width(42.dp)
+                            .height(4.dp)
+                            .background(
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                RoundedCornerShape(2.dp)
                             )
-                        }
-                    }
+                    )
                 }
 
+                val scrollState = rememberScrollState()
+                Row(
+                    modifier = Modifier.horizontalScroll(scrollState),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Tactile side drag handle grip
+                    TactileGrip(isHorizontal = true, modifier = dragModifier)
+
+                    // Core Drawing Tools
+                    PaletteToolsContent(
+                        state = state,
+                        presetColors = presetColors,
+                        showColorMenu = showColorMenu,
+                        onShowColorMenuChange = { showColorMenu = it },
+                        showWidthMenu = showWidthMenu,
+                        onShowWidthMenuChange = { showWidthMenu = it },
+                        showShapeMenu = showShapeMenu,
+                        onShowShapeMenuChange = { showShapeMenu = it },
+                        orientation = orientation,
+                        onToggleOrientation = { orientation = ToolbarOrientation.VERTICAL },
+                        onOpenSettings = onOpenSettings
+                    )
+                }
+
+                // Status row
+                HorizontalStatusRow(state)
+            }
+        } else {
+            // Vertical Layout (Side dock rail)
+            Column(
+                modifier = Modifier
+                    .padding(vertical = 6.dp, horizontal = 6.dp)
+                    .width(52.dp)
+                    .heightIn(max = 480.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Top drag pill handle
                 Box(
                     modifier = Modifier
-                        .height(28.dp)
-                        .width(1.dp)
-                        .background(Color(0x1F000000))
-                )
+                        .then(dragModifier)
+                        .padding(bottom = 6.dp)
+                        .width(36.dp)
+                        .height(10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(28.dp)
+                            .height(4.dp)
+                            .background(
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                RoundedCornerShape(2.dp)
+                            )
+                    )
+                }
 
-                // Finger Drawing / Palm Rejection Toggle Button
-                val fingerDrawOn = state.palmConfig.isFingerDrawingEnabled
-                IconButton(
-                    onClick = { state.toggleFingerDrawing() },
+                val verticalScroll = rememberScrollState()
+                Column(
                     modifier = Modifier
-                        .size(36.dp)
-                        .background(
-                            if (fingerDrawOn) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
-                            else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                            shape = CircleShape
-                        )
+                        .verticalScroll(verticalScroll)
+                        .weight(1f, fill = false),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(
-                        imageVector = if (fingerDrawOn) Icons.Default.TouchApp else Icons.Default.PanTool,
-                        contentDescription = if (fingerDrawOn) "Draw with Finger ON" else "Stylus Only (Palm Proof)",
-                        tint = if (fingerDrawOn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
+                    PaletteToolsContent(
+                        state = state,
+                        presetColors = presetColors,
+                        showColorMenu = showColorMenu,
+                        onShowColorMenuChange = { showColorMenu = it },
+                        showWidthMenu = showWidthMenu,
+                        onShowWidthMenuChange = { showWidthMenu = it },
+                        showShapeMenu = showShapeMenu,
+                        onShowShapeMenuChange = { showShapeMenu = it },
+                        orientation = orientation,
+                        onToggleOrientation = { orientation = ToolbarOrientation.HORIZONTAL },
+                        onOpenSettings = onOpenSettings
                     )
                 }
 
-                // Layout Switcher: Paged vs Infinite
-                val isPaged = state.document.layoutMode == CanvasLayoutMode.PAGED
-                IconButton(
-                    onClick = { state.toggleLayoutMode() },
-                    modifier = Modifier.size(36.dp)
+                // Bottom grip handle
+                Box(
+                    modifier = Modifier
+                        .then(dragModifier)
+                        .padding(top = 6.dp)
+                        .width(36.dp)
+                        .height(10.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Layers,
-                        contentDescription = if (isPaged) "Paged Mode" else "Infinite Mode",
-                        tint = if (isPaged) MaterialTheme.colorScheme.primary else Color(0xFF6B7280),
-                        modifier = Modifier.size(20.dp)
+                    Box(
+                        modifier = Modifier
+                            .width(28.dp)
+                            .height(4.dp)
+                            .background(
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                RoundedCornerShape(2.dp)
+                            )
                     )
-                }
-
-                // Reset Zoom / Fit Page Button
-                IconButton(
-                    onClick = {
-                        val curPage = state.currentPage
-                        state.viewportState.centerAndFit(curPage.width, curPage.height)
-                    },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FitScreen,
-                        contentDescription = "Fit to Screen",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Undo / Redo
-                IconButton(
-                    onClick = { state.undo() },
-                    enabled = state.canUndo,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Undo,
-                        contentDescription = "Undo",
-                        tint = if (state.canUndo) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = { state.redo() },
-                    enabled = state.canRedo,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Redo,
-                        contentDescription = "Redo",
-                        tint = if (state.canRedo) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Add Page (In Paged mode)
-                if (isPaged) {
-                    IconButton(
-                        onClick = { state.addNewPage() },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add Page",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
                 }
             }
+        }
+    }
+}
 
-            // Quick Status bar beneath palette showing current tool, mode & zoom
-            Row(
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                val toolName = when (state.currentTool) {
-                    DrawingTool.PEN -> "Pen"
-                    DrawingTool.HIGHLIGHTER -> "Marker"
-                    DrawingTool.STROKE_ERASER -> "Eraser: Stroke"
-                    DrawingTool.SEGMENT_ERASER -> "Eraser: Precision"
-                    DrawingTool.SHAPE -> "Shape"
-                    DrawingTool.TEXT -> "Text"
-                    DrawingTool.LASSO -> "Lasso"
+@Composable
+private fun PaletteToolsContent(
+    state: CanvasState,
+    presetColors: List<Color>,
+    showColorMenu: Boolean,
+    onShowColorMenuChange: (Boolean) -> Unit,
+    showWidthMenu: Boolean,
+    onShowWidthMenuChange: (Boolean) -> Unit,
+    showShapeMenu: Boolean,
+    onShowShapeMenuChange: (Boolean) -> Unit,
+    orientation: ToolbarOrientation,
+    onToggleOrientation: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    // 1. Pen Tool
+    ToolButton(
+        icon = Icons.Default.ModeEdit,
+        label = "Pen",
+        isSelected = state.currentTool == DrawingTool.PEN,
+        onClick = { state.currentTool = DrawingTool.PEN }
+    )
+
+    // 2. Highlighter Tool (Chisel-Tip Marker)
+    ToolButton(
+        painter = painterResource(id = R.drawable.ic_highlighter_marker),
+        label = "Highlighter Marker",
+        isSelected = state.currentTool == DrawingTool.HIGHLIGHTER,
+        onClick = { state.currentTool = DrawingTool.HIGHLIGHTER }
+    )
+
+    // 3. Rubber Eraser Tool (Switches between Stroke and Precision Segment)
+    val isSegmentEraser = state.currentTool == DrawingTool.SEGMENT_ERASER
+    val isEraserActive = state.currentTool == DrawingTool.STROKE_ERASER || isSegmentEraser
+    ToolButton(
+        painter = painterResource(
+            id = if (isSegmentEraser) R.drawable.ic_eraser_precision else R.drawable.ic_eraser_stroke
+        ),
+        label = if (isSegmentEraser) "Precision Segment Eraser" else "Stroke Eraser",
+        isSelected = isEraserActive,
+        onClick = {
+            state.currentTool = if (state.currentTool == DrawingTool.STROKE_ERASER) {
+                DrawingTool.SEGMENT_ERASER
+            } else {
+                DrawingTool.STROKE_ERASER
+            }
+        }
+    )
+
+    // 4. Shapes Tool
+    Box {
+        ToolButton(
+            icon = Icons.Default.CropSquare,
+            label = "Shapes",
+            isSelected = state.currentTool == DrawingTool.SHAPE,
+            onClick = {
+                state.currentTool = DrawingTool.SHAPE
+                onShowShapeMenuChange(!showShapeMenu)
+            }
+        )
+        DropdownMenu(
+            expanded = showShapeMenu,
+            onDismissRequest = { onShowShapeMenuChange(false) }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Rectangle") },
+                onClick = {
+                    state.currentShapeType = ShapeType.RECTANGLE
+                    state.currentTool = DrawingTool.SHAPE
+                    onShowShapeMenuChange(false)
                 }
-                Text(
-                    text = toolName,
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = if (state.palmConfig.isFingerDrawingEnabled) "Finger: ON" else "Stylus",
-                    fontSize = 10.sp,
-                    color = if (state.palmConfig.isFingerDrawingEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
-                )
-                Text(
-                    text = if (state.document.layoutMode == CanvasLayoutMode.PAGED) "Page ${state.document.activePageIndex + 1}/${state.document.pages.size}" else "Infinite",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Zoom ${(state.viewportState.scale * 100).toInt()}%",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            DropdownMenuItem(
+                text = { Text("Ellipse / Circle") },
+                onClick = {
+                    state.currentShapeType = ShapeType.ELLIPSE
+                    state.currentTool = DrawingTool.SHAPE
+                    onShowShapeMenuChange(false)
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Line") },
+                onClick = {
+                    state.currentShapeType = ShapeType.LINE
+                    state.currentTool = DrawingTool.SHAPE
+                    onShowShapeMenuChange(false)
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Arrow") },
+                onClick = {
+                    state.currentShapeType = ShapeType.ARROW
+                    state.currentTool = DrawingTool.SHAPE
+                    onShowShapeMenuChange(false)
+                }
+            )
+        }
+    }
+
+    // 5. Text Box Tool
+    ToolButton(
+        icon = Icons.Default.TextFields,
+        label = "Text Box",
+        isSelected = state.currentTool == DrawingTool.TEXT,
+        onClick = { state.currentTool = DrawingTool.TEXT }
+    )
+
+    DividerItem(orientation)
+
+    // 6. Color Swatch Button
+    Box {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(state.currentColor)
+                .border(2.dp, Color.White, CircleShape)
+                .border(3.dp, Color(0x33000000), CircleShape)
+                .clickable { onShowColorMenuChange(!showColorMenu) }
+        )
+        DropdownMenu(
+            expanded = showColorMenu,
+            onDismissRequest = { onShowColorMenuChange(false) }
+        ) {
+            Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                presetColors.forEach { color ->
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                            .border(
+                                width = if (state.currentColor == color) 3.dp else 1.dp,
+                                color = if (state.currentColor == color) MaterialTheme.colorScheme.primary else Color(0x33000000),
+                                shape = CircleShape
+                            )
+                            .clickable {
+                                state.currentColor = color
+                                onShowColorMenuChange(false)
+                            }
+                    )
+                }
+            }
+        }
+    }
+
+    // 7. Stroke Width Selector
+    Box {
+        IconButton(
+            onClick = { onShowWidthMenuChange(!showWidthMenu) },
+            modifier = Modifier.size(34.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(state.currentStrokeWidth.coerceIn(3f, 16f).dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurface)
+            )
+        }
+        DropdownMenu(
+            expanded = showWidthMenu,
+            onDismissRequest = { onShowWidthMenuChange(false) }
+        ) {
+            Column(modifier = Modifier.padding(12.dp).width(160.dp)) {
+                Text("Stroke Width: ${state.currentStrokeWidth.toInt()} px", fontSize = 12.sp)
+                Slider(
+                    value = state.currentStrokeWidth,
+                    onValueChange = { state.currentStrokeWidth = it },
+                    valueRange = 1f..24f
                 )
             }
         }
+    }
+
+    DividerItem(orientation)
+
+    // 8. Finger Drawing / Stylus Toggle
+    val fingerDrawOn = state.palmConfig.isFingerDrawingEnabled
+    IconButton(
+        onClick = { state.toggleFingerDrawing() },
+        modifier = Modifier
+            .size(34.dp)
+            .background(
+                if (fingerDrawOn) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                shape = CircleShape
+            )
+    ) {
+        Icon(
+            imageVector = if (fingerDrawOn) Icons.Default.TouchApp else Icons.Default.PanTool,
+            contentDescription = if (fingerDrawOn) "Draw with Finger ON" else "Stylus Only (Palm Proof)",
+            tint = if (fingerDrawOn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(19.dp)
+        )
+    }
+
+    // 9. Undo / Redo
+    IconButton(
+        onClick = { state.undo() },
+        enabled = state.canUndo,
+        modifier = Modifier.size(34.dp)
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.Undo,
+            contentDescription = "Undo",
+            tint = if (state.canUndo) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+            modifier = Modifier.size(19.dp)
+        )
+    }
+
+    IconButton(
+        onClick = { state.redo() },
+        enabled = state.canRedo,
+        modifier = Modifier.size(34.dp)
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.Redo,
+            contentDescription = "Redo",
+            tint = if (state.canRedo) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+            modifier = Modifier.size(19.dp)
+        )
+    }
+
+    // 10. Fit Screen / Center Page
+    IconButton(
+        onClick = {
+            val curPage = state.currentPage
+            state.viewportState.centerAndFit(curPage.width, curPage.height)
+        },
+        modifier = Modifier.size(34.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.FitScreen,
+            contentDescription = "Fit to Screen",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(19.dp)
+        )
+    }
+
+    DividerItem(orientation)
+
+    // 11. Flip Orientation Button (Horizontal <-> Vertical)
+    IconButton(
+        onClick = onToggleOrientation,
+        modifier = Modifier.size(34.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.ScreenRotation,
+            contentDescription = "Switch Orientation (Horizontal/Vertical)",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+
+    // 12. Settings / Palm Rejection Config Button
+    IconButton(
+        onClick = onOpenSettings,
+        modifier = Modifier.size(34.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Settings,
+            contentDescription = "Canvas & Palm Settings",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun TactileGrip(isHorizontal: Boolean, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .padding(horizontal = 4.dp)
+            .size(if (isHorizontal) 14.dp else 28.dp, if (isHorizontal) 28.dp else 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isHorizontal) {
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.width(3.dp).height(18.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(1.5.dp)))
+                Box(modifier = Modifier.width(3.dp).height(18.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(1.5.dp)))
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(modifier = Modifier.height(3.dp).width(18.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(1.5.dp)))
+                Box(modifier = Modifier.height(3.dp).width(18.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(1.5.dp)))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DividerItem(orientation: ToolbarOrientation) {
+    if (orientation == ToolbarOrientation.HORIZONTAL) {
+        Box(modifier = Modifier.height(24.dp).width(1.dp).background(Color(0x1F000000)))
+    } else {
+        Box(modifier = Modifier.width(24.dp).height(1.dp).background(Color(0x1F000000)))
+    }
+}
+
+@Composable
+private fun HorizontalStatusRow(state: CanvasState) {
+    Row(
+        modifier = Modifier
+            .padding(top = 2.dp)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        val toolName = when (state.currentTool) {
+            DrawingTool.PEN -> "Pen"
+            DrawingTool.HIGHLIGHTER -> "Marker"
+            DrawingTool.STROKE_ERASER -> "Eraser: Stroke"
+            DrawingTool.SEGMENT_ERASER -> "Eraser: Precision"
+            DrawingTool.SHAPE -> "Shape"
+            DrawingTool.TEXT -> "Text"
+            DrawingTool.LASSO -> "Lasso"
+        }
+        Text(text = toolName, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+        Text(
+            text = if (state.palmConfig.isFingerDrawingEnabled) "Finger: ON" else "Stylus",
+            fontSize = 10.sp,
+            color = if (state.palmConfig.isFingerDrawingEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
+        )
+        Text(
+            text = if (state.document.layoutMode == CanvasLayoutMode.PAGED) "Page ${state.document.activePageIndex + 1}/${state.document.pages.size}" else "Infinite",
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "Zoom ${(state.viewportState.scale * 100).toInt()}%",
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -480,7 +588,7 @@ private fun ToolButton(
     IconButton(
         onClick = onClick,
         modifier = Modifier
-            .size(38.dp)
+            .size(36.dp)
             .background(
                 color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
                 shape = RoundedCornerShape(12.dp)
@@ -490,7 +598,7 @@ private fun ToolButton(
             painter = painter,
             contentDescription = label,
             tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(20.dp)
         )
     }
 }
@@ -505,7 +613,7 @@ private fun ToolButton(
     IconButton(
         onClick = onClick,
         modifier = Modifier
-            .size(38.dp)
+            .size(36.dp)
             .background(
                 color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
                 shape = RoundedCornerShape(12.dp)
@@ -515,7 +623,7 @@ private fun ToolButton(
             imageVector = icon,
             contentDescription = label,
             tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(20.dp)
         )
     }
 }

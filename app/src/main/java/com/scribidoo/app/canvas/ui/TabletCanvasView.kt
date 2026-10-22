@@ -75,6 +75,7 @@ fun TabletCanvasView(
                         val verdict = inputClassifier.evaluateTouch(
                             event = motionEvent,
                             pointerIndex = 0,
+                            containerWidth = state.viewportState.containerSize.width,
                             containerHeight = state.viewportState.containerSize.height,
                             activePointersCount = 1
                         )
@@ -163,6 +164,7 @@ fun TabletCanvasView(
                             val verdict = inputClassifier.evaluateTouch(
                                 event = motionEvent,
                                 pointerIndex = 0,
+                                containerWidth = state.viewportState.containerSize.width,
                                 containerHeight = state.viewportState.containerSize.height,
                                 activePointersCount = 1
                             )

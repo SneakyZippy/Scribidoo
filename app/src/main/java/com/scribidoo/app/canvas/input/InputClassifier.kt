@@ -1,7 +1,6 @@
 package com.scribidoo.app.canvas.input
 
 import android.view.MotionEvent
-import androidx.compose.ui.geometry.Offset
 
 enum class ClassifiedTool {
     STYLUS,
@@ -16,12 +15,18 @@ enum class InputVerdict {
     DISCARD_PALM
 }
 
+enum class DominantHand {
+    RIGHT_HANDED,
+    LEFT_HANDED
+}
+
 data class PalmRejectionConfig(
-    val isFingerDrawingEnabled: Boolean = true, // Enabled by default for phones & touch screens
-    val touchSizeThreshold: Float = 0.35f,
-    val touchMajorThresholdPx: Float = 120f, // Approx 40dp at 3x density
-    val palmShieldBottomRatio: Float = 0.28f, // Bottom 28% rejected if palm shield is active
-    val isPalmShieldActive: Boolean = true
+    val isFingerDrawingEnabled: Boolean = true, // Enabled by default for touch screens
+    val touchSizeThreshold: Float = 0.35f, // Slider: 0.15 to 0.60
+    val touchMajorThresholdPx: Float = 120f, // Slider: 60 to 260
+    val palmShieldBottomRatio: Float = 0.28f, // Slider: 0.0 to 0.50 (height exclusion)
+    val isPalmShieldActive: Boolean = true,
+    val dominantHand: DominantHand = DominantHand.RIGHT_HANDED
 )
 
 class InputClassifier(
@@ -48,6 +53,7 @@ class InputClassifier(
     fun evaluateTouch(
         event: MotionEvent,
         pointerIndex: Int,
+        containerWidth: Float,
         containerHeight: Float,
         activePointersCount: Int
     ): InputVerdict {
@@ -73,6 +79,7 @@ class InputClassifier(
             // Finger drawing IS enabled: Apply software palm rejection heuristics
             val touchSize = event.getSize(pointerIndex)
             val touchMajor = event.getTouchMajor(pointerIndex)
+            val xPos = event.getX(pointerIndex)
             val yPos = event.getY(pointerIndex)
 
             // A. Contact area check: Palms have large contact ellipses
@@ -84,11 +91,24 @@ class InputClassifier(
                 return InputVerdict.DISCARD_PALM
             }
 
-            // B. Palm Shield Heuristic: Rejects accidental rests in the lower screen quadrant
-            if (config.isPalmShieldActive && containerHeight > 0f) {
-                val shieldCutoff = containerHeight * (1.0f - config.palmShieldBottomRatio)
-                if (yPos > shieldCutoff && touchSize > 0.18f) {
-                    return InputVerdict.DISCARD_PALM
+            // B. Handedness Palm Shield Heuristic: Rejects accidental rests in the writing quadrant
+            if (config.isPalmShieldActive && containerHeight > 0f && containerWidth > 0f) {
+                val shieldCutoffY = containerHeight * (1.0f - config.palmShieldBottomRatio)
+                if (yPos > shieldCutoffY && touchSize > 0.16f) {
+                    when (config.dominantHand) {
+                        DominantHand.RIGHT_HANDED -> {
+                            // Right-handed writers rest palm towards the bottom-right
+                            if (xPos > containerWidth * 0.35f) {
+                                return InputVerdict.DISCARD_PALM
+                            }
+                        }
+                        DominantHand.LEFT_HANDED -> {
+                            // Left-handed writers rest palm towards the bottom-left
+                            if (xPos < containerWidth * 0.65f) {
+                                return InputVerdict.DISCARD_PALM
+                            }
+                        }
+                    }
                 }
             }
 
