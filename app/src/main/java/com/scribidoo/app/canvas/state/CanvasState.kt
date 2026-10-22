@@ -251,6 +251,13 @@ class CanvasState(
         backgroundBitmaps.clear()
     }
 
+    fun renameDocument(newTitle: String) {
+        if (newTitle.isNotBlank()) {
+            pushHistory()
+            document = document.copy(title = newTitle.trim(), modifiedAt = System.currentTimeMillis())
+        }
+    }
+
     fun initializeFromPdf(pdfFile: File, pageCount: Int) {
         pushHistory()
         val pages = (0 until pageCount).map { idx ->

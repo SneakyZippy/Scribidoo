@@ -113,6 +113,18 @@ fun FloatingToolPalette(
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Top subtle pill drag handle
+            Box(
+                modifier = Modifier
+                    .padding(bottom = 5.dp)
+                    .width(42.dp)
+                    .height(4.dp)
+                    .background(
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                        RoundedCornerShape(2.dp)
+                    )
+            )
+
             // Main tool buttons row (horizontally scrollable on narrower phone screens)
             val scrollState = rememberScrollState()
             Row(
@@ -120,15 +132,37 @@ fun FloatingToolPalette(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Drag handle icon
-                Icon(
-                    imageVector = Icons.Default.Gesture,
-                    contentDescription = "Drag Palette",
-                    tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                // Tactile side drag handle grip
+                Box(
                     modifier = Modifier
-                        .size(20.dp)
-                        .padding(horizontal = 2.dp)
-                )
+                        .padding(start = 4.dp, end = 6.dp)
+                        .size(width = 14.dp, height = 30.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(3.dp)
+                                .height(20.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                    RoundedCornerShape(1.5.dp)
+                                )
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(3.dp)
+                                .height(20.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                    RoundedCornerShape(1.5.dp)
+                                )
+                        )
+                    }
+                }
 
                 // Pen Tool
                 ToolButton(
