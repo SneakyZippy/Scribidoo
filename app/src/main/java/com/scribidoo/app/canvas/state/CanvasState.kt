@@ -3,11 +3,13 @@ package com.scribidoo.app.canvas.state
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import android.graphics.Bitmap
 import com.scribidoo.app.canvas.ink.EraserEngine
 import com.scribidoo.app.canvas.input.PalmRejectionConfig
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
@@ -20,6 +22,7 @@ import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.model.StrokeModel
 import com.scribidoo.app.canvas.model.TextBoxModel
 import com.scribidoo.app.canvas.viewport.ViewportState
+import java.io.File
 
 class CanvasState(
     initialDocument: DocumentModel = DocumentModel(),
@@ -27,6 +30,9 @@ class CanvasState(
 ) {
     var document by mutableStateOf(initialDocument)
         private set
+
+    // Cache of page background bitmaps (from PDF or imported photo)
+    val backgroundBitmaps = mutableStateMapOf<Int, Bitmap>()
 
     var currentTool by mutableStateOf(DrawingTool.PEN)
     var currentShapeType by mutableStateOf(ShapeType.RECTANGLE)
@@ -233,5 +239,32 @@ class CanvasState(
         if (index in document.pages.indices) {
             document = document.copy(activePageIndex = index)
         }
+    }
+
+    fun setBackgroundBitmap(pageIndex: Int, bitmap: Bitmap) {
+        backgroundBitmaps[pageIndex] = bitmap
+    }
+
+    fun loadDocument(doc: DocumentModel) {
+        pushHistory()
+        document = doc
+        backgroundBitmaps.clear()
+    }
+
+    fun initializeFromPdf(pdfFile: File, pageCount: Int) {
+        pushHistory()
+        val pages = (0 until pageCount).map { idx ->
+            PageModel(
+                index = idx,
+                backgroundPdfPage = idx,
+                backgroundUri = pdfFile.absolutePath
+            )
+        }
+        document = DocumentModel(
+            title = pdfFile.nameWithoutExtension,
+            pages = pages,
+            activePageIndex = 0
+        )
+        backgroundBitmaps.clear()
     }
 }

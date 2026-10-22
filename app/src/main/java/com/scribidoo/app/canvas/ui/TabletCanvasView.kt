@@ -23,11 +23,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.toSize
 import com.scribidoo.app.canvas.ink.InkPathGenerator
 import com.scribidoo.app.canvas.input.ClassifiedTool
@@ -246,12 +248,23 @@ fun TabletCanvasView(
                             topLeft = Offset(4f, 6f),
                             size = Size(curPage.width, curPage.height)
                         )
-                        // Page background
-                        drawRect(
-                            color = Color.White,
-                            topLeft = Offset.Zero,
-                            size = Size(curPage.width, curPage.height)
-                        )
+
+                        // Page background (Render imported PDF/Image or Paper Guidelines)
+                        val bgBitmap = state.backgroundBitmaps[curPage.index]
+                        if (bgBitmap != null) {
+                            drawImage(
+                                image = bgBitmap.asImageBitmap(),
+                                dstSize = IntSize(curPage.width.toInt(), curPage.height.toInt())
+                            )
+                        } else {
+                            drawRect(
+                                color = Color.White,
+                                topLeft = Offset.Zero,
+                                size = Size(curPage.width, curPage.height)
+                            )
+                            drawPaperGuidelines(curPage.width, curPage.height)
+                        }
+
                         // Page border
                         drawRect(
                             color = Color(0xFFE5E7EB),
@@ -259,9 +272,6 @@ fun TabletCanvasView(
                             size = Size(curPage.width, curPage.height),
                             style = Stroke(width = 1f)
                         )
-
-                        // Subtle ruled lines or dot grid on paper
-                        drawPaperGuidelines(curPage.width, curPage.height)
                     }
                     CanvasLayoutMode.INFINITE -> {
                         // Draw infinite dot grid relative to canvas coordinates
