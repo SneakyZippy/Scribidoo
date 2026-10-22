@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Chisel-tip Highlighter Marker barrel -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M16.59,2.83 L21.17,7.41 C21.95,8.19 21.95,9.46 21.17,10.24 L17.5,13.91 L10.09,6.5 L13.76,2.83 C14.54,2.05 15.81,2.05 16.59,2.83 Z"/>
+    <!-- Marker body & grip collar -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8.68,7.91 L16.09,15.32 L13.5,17.91 L6.09,10.5 Z"/>
+    <!-- Angled chisel nib -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4.68,11.91 L12.09,19.32 L8.5,21.5 L2.5,21.5 L2.5,15.5 Z"/>
+</vector>

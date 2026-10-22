@@ -14,7 +14,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -55,6 +59,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.res.painterResource
+import com.scribidoo.app.R
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -103,11 +110,13 @@ fun FloatingToolPalette(
         tonalElevation = 8.dp
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Main tool buttons row
+            // Main tool buttons row (horizontally scrollable on narrower phone screens)
+            val scrollState = rememberScrollState()
             Row(
+                modifier = Modifier.horizontalScroll(scrollState),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -129,19 +138,23 @@ fun FloatingToolPalette(
                     onClick = { state.currentTool = DrawingTool.PEN }
                 )
 
-                // Highlighter Tool
+                // Highlighter Tool (Chisel-Tip Marker)
                 ToolButton(
-                    icon = Icons.Default.Highlight,
-                    label = "Highlighter",
+                    painter = painterResource(id = R.drawable.ic_highlighter_marker),
+                    label = "Highlighter Marker",
                     isSelected = state.currentTool == DrawingTool.HIGHLIGHTER,
                     onClick = { state.currentTool = DrawingTool.HIGHLIGHTER }
                 )
 
-                // Eraser Tool (Click switches between Stroke and Segment eraser)
+                // Rubber Eraser Tool (Click switches between Whole Stroke and Precision Segment eraser)
+                val isSegmentEraser = state.currentTool == DrawingTool.SEGMENT_ERASER
+                val isEraserActive = state.currentTool == DrawingTool.STROKE_ERASER || isSegmentEraser
                 ToolButton(
-                    icon = if (state.currentTool == DrawingTool.SEGMENT_ERASER) Icons.Default.AutoFixHigh else Icons.Default.DeleteSweep,
-                    label = if (state.currentTool == DrawingTool.SEGMENT_ERASER) "Slice Eraser" else "Stroke Eraser",
-                    isSelected = state.currentTool == DrawingTool.STROKE_ERASER || state.currentTool == DrawingTool.SEGMENT_ERASER,
+                    painter = painterResource(
+                        id = if (isSegmentEraser) R.drawable.ic_eraser_precision else R.drawable.ic_eraser_stroke
+                    ),
+                    label = if (isSegmentEraser) "Precision Segment Eraser" else "Stroke Eraser",
+                    isSelected = isEraserActive,
                     onClick = {
                         state.currentTool = if (state.currentTool == DrawingTool.STROKE_ERASER) {
                             DrawingTool.SEGMENT_ERASER
@@ -381,31 +394,70 @@ fun FloatingToolPalette(
                 }
             }
 
-            // Quick Status bar beneath palette showing current mode & zoom
+            // Quick Status bar beneath palette showing current tool, mode & zoom
             Row(
                 modifier = Modifier
                     .padding(top = 2.dp)
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                val toolName = when (state.currentTool) {
+                    DrawingTool.PEN -> "Pen"
+                    DrawingTool.HIGHLIGHTER -> "Marker"
+                    DrawingTool.STROKE_ERASER -> "Eraser: Stroke"
+                    DrawingTool.SEGMENT_ERASER -> "Eraser: Precision"
+                    DrawingTool.SHAPE -> "Shape"
+                    DrawingTool.TEXT -> "Text"
+                    DrawingTool.LASSO -> "Lasso"
+                }
                 Text(
-                    text = if (state.palmConfig.isFingerDrawingEnabled) "Finger Draw: ON" else "Active Stylus (Palm Proof)",
+                    text = toolName,
                     fontSize = 10.sp,
-                    color = if (state.palmConfig.isFingerDrawingEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Mode: ${if (state.document.layoutMode == CanvasLayoutMode.PAGED) "Page ${state.document.activePageIndex + 1}/${state.document.pages.size}" else "Infinite"}",
+                    text = if (state.palmConfig.isFingerDrawingEnabled) "Finger: ON" else "Stylus",
+                    fontSize = 10.sp,
+                    color = if (state.palmConfig.isFingerDrawingEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
+                )
+                Text(
+                    text = if (state.document.layoutMode == CanvasLayoutMode.PAGED) "Page ${state.document.activePageIndex + 1}/${state.document.pages.size}" else "Infinite",
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "Zoom: ${(state.viewportState.scale * 100).toInt()}%",
+                    text = "Zoom ${(state.viewportState.scale * 100).toInt()}%",
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ToolButton(
+    painter: Painter,
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(38.dp)
+            .background(
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+    ) {
+        Icon(
+            painter = painter,
+            contentDescription = label,
+            tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp)
+        )
     }
 }
 

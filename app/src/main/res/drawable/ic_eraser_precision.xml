@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Main eraser block -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M15.14,3.14 L20.86,8.86 C21.64,9.64 21.64,10.9 20.86,11.68 L11.44,21.1 C11.05,21.49 10.54,21.71 10,21.71 H3 C2.45,21.71 2,21.26 2,20.71 C2,20.44 2.11,20.19 2.29,20.01 L7.71,14.59 L15.14,3.14 Z M4,19.71 H9.41 L17.44,11.68 L12.32,6.56 L4,14.88 V19.71 Z"/>
+    <!-- Precision crosshairs at top left -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5,5 L9,5 L9,7 L5,7 Z"/>
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6,3 L8,3 L8,9 L6,9 Z"/>
+</vector>

@@ -17,7 +17,7 @@ enum class InputVerdict {
 }
 
 data class PalmRejectionConfig(
-    val isFingerDrawingEnabled: Boolean = false,
+    val isFingerDrawingEnabled: Boolean = true, // Enabled by default for phones & touch screens
     val touchSizeThreshold: Float = 0.35f,
     val touchMajorThresholdPx: Float = 120f, // Approx 40dp at 3x density
     val palmShieldBottomRatio: Float = 0.28f, // Bottom 28% rejected if palm shield is active
@@ -76,11 +76,11 @@ class InputClassifier(
             val yPos = event.getY(pointerIndex)
 
             // A. Contact area check: Palms have large contact ellipses
-            if (touchSize > config.touchSizeThreshold) {
+            if (touchMajor > config.touchMajorThresholdPx) {
                 return InputVerdict.DISCARD_PALM
             }
 
-            if (touchMajor > 0 && touchMajor > config.touchMajorThresholdPx) {
+            if (touchSize > config.touchSizeThreshold && touchMajor > 0f) {
                 return InputVerdict.DISCARD_PALM
             }
 
