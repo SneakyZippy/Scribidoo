@@ -8,8 +8,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,9 +30,11 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -50,6 +55,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,7 +97,7 @@ fun CanvasWorkspaceScreen(
                     state.initializeFromPdf(file, count)
                     // Render first page
                     val bmp = pdfManager.renderPageBitmap(file, 0)
-                    state.setBackgroundBitmap(0, bmp)
+                    state.setBackgroundBitmap(0, bmp.asImageBitmap())
                     state.viewportState.centerAndFit(state.currentPage.width, state.currentPage.height)
                     Toast.makeText(context, "Loaded PDF (${count} pages)", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
@@ -108,7 +115,7 @@ fun CanvasWorkspaceScreen(
             if (file.exists()) {
                 val pageIndex = curPage.backgroundPdfPage ?: curPage.index
                 val bmp = pdfManager.renderPageBitmap(file, pageIndex)
-                state.setBackgroundBitmap(curPage.index, bmp)
+                state.setBackgroundBitmap(curPage.index, bmp.asImageBitmap())
             }
         }
     }
@@ -367,4 +374,116 @@ fun CanvasWorkspaceScreen(
             }
         )
     }
+
+    // Text Box Input / Edit Dialog
+    if (state.activeTextBoxForEdit != null) {
+        val targetBox = state.activeTextBoxForEdit!!
+        TextBoxDialog(
+            initialText = targetBox.text,
+            initialFontSize = targetBox.fontSizeSp,
+            isEditing = true,
+            onDismiss = { state.activeTextBoxForEdit = null },
+            onSave = { newText, newFontSize ->
+                state.updateTextBox(targetBox.id, newText, newFontSize, targetBox.colorArgb)
+                state.activeTextBoxForEdit = null
+            },
+            onDelete = {
+                state.deleteTextBox(targetBox.id)
+                state.activeTextBoxForEdit = null
+            }
+        )
+    } else if (state.pendingTextInsertPoint != null) {
+        val insertPoint = state.pendingTextInsertPoint!!
+        TextBoxDialog(
+            initialText = "",
+            initialFontSize = 20f,
+            isEditing = false,
+            onDismiss = { state.pendingTextInsertPoint = null },
+            onSave = { newText, newFontSize ->
+                state.addTextBox(
+                    canvasPoint = insertPoint,
+                    text = newText,
+                    fontSizeSp = newFontSize,
+                    colorArgb = state.currentColor.toArgb()
+                )
+                state.pendingTextInsertPoint = null
+            }
+        )
+    }
+}
+
+@Composable
+fun TextBoxDialog(
+    initialText: String,
+    initialFontSize: Float,
+    isEditing: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (text: String, fontSize: Float) -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    var text by remember { mutableStateOf(initialText) }
+    var fontSize by remember { mutableFloatStateOf(initialFontSize) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (isEditing) "Edit Text" else "Add Text Note",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = { Text("Type note text...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 5
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Size:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    listOf(14f to "Small", 20f to "Medium", 28f to "Large").forEach { (size, label) ->
+                        FilterChip(
+                            selected = fontSize == size,
+                            onClick = { fontSize = size },
+                            label = { Text(label, fontSize = 11.sp) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(text, fontSize) },
+                enabled = text.isNotBlank()
+            ) {
+                Text("Done")
+            }
+        },
+        dismissButton = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isEditing && onDelete != null) {
+                    TextButton(onClick = onDelete) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        }
+    )
 }

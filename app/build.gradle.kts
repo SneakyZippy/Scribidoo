@@ -25,6 +25,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    sourceSets {
+        getByName("main") {
+            kotlin.directories.add("../shared/src/commonMain/kotlin")
+        }
+    }
     buildFeatures {
       compose = true
       aidl = false

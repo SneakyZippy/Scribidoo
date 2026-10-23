@@ -8,13 +8,17 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.core.content.FileProvider
 import com.scribidoo.app.canvas.model.DocumentModel
 import com.scribidoo.app.canvas.model.PageModel
 import com.scribidoo.app.canvas.model.ShapeModel
 import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.model.StrokeModel
+import com.scribidoo.app.canvas.model.TextBoxModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -32,7 +36,7 @@ class CanvasExporter(private val context: Context) {
     suspend fun exportToPdf(
         document: DocumentModel,
         pageIndex: Int? = null,
-        backgroundBitmaps: Map<Int, Bitmap> = emptyMap()
+        backgroundBitmaps: Map<Int, ImageBitmap> = emptyMap()
     ): File = withContext(Dispatchers.IO) {
         val pdfDocument = PdfDocument()
         val pagesToExport = if (pageIndex != null) {
@@ -54,7 +58,7 @@ class CanvasExporter(private val context: Context) {
             // 1. Draw Page Background
             val bgBitmap = backgroundBitmaps[page.index]
             if (bgBitmap != null) {
-                canvas.drawBitmap(bgBitmap, 0f, 0f, null)
+                canvas.drawBitmap(bgBitmap.asAndroidBitmap(), 0f, 0f, null)
             } else {
                 // White paper background
                 canvas.drawColor(android.graphics.Color.WHITE)
@@ -65,6 +69,9 @@ class CanvasExporter(private val context: Context) {
 
             // 3. Draw Shapes
             renderShapesToAndroidCanvas(canvas, page.shapes)
+
+            // 4. Draw Text Boxes
+            renderTextBoxesToAndroidCanvas(canvas, page.textBoxes)
 
             pdfDocument.finishPage(pdfPage)
         }
@@ -84,7 +91,7 @@ class CanvasExporter(private val context: Context) {
      */
     suspend fun exportToPng(
         page: PageModel,
-        backgroundBitmap: Bitmap? = null
+        backgroundBitmap: ImageBitmap? = null
     ): File = withContext(Dispatchers.IO) {
         val bitmap = Bitmap.createBitmap(
             page.width.toInt(),
@@ -94,13 +101,14 @@ class CanvasExporter(private val context: Context) {
         val canvas = Canvas(bitmap)
 
         if (backgroundBitmap != null) {
-            canvas.drawBitmap(backgroundBitmap, 0f, 0f, null)
+            canvas.drawBitmap(backgroundBitmap.asAndroidBitmap(), 0f, 0f, null)
         } else {
             canvas.drawColor(android.graphics.Color.WHITE)
         }
 
         renderStrokesToAndroidCanvas(canvas, page.strokes)
         renderShapesToAndroidCanvas(canvas, page.shapes)
+        renderTextBoxesToAndroidCanvas(canvas, page.textBoxes)
 
         val outputFile = File(exportsDir, "page_${page.index}_${System.currentTimeMillis()}.png")
         FileOutputStream(outputFile).use { out ->
@@ -230,6 +238,18 @@ class CanvasExporter(private val context: Context) {
                     canvas.drawOval(left, top, right, bottom, paint)
                 }
             }
+        }
+    }
+
+    private fun renderTextBoxesToAndroidCanvas(canvas: Canvas, textBoxes: List<TextBoxModel>) {
+        for (tb in textBoxes) {
+            val textPaint = Paint().apply {
+                isAntiAlias = true
+                color = tb.colorArgb
+                textSize = tb.fontSizeSp * 2.2f
+                typeface = Typeface.DEFAULT
+            }
+            canvas.drawText(tb.text, tb.x, tb.y, textPaint)
         }
     }
 }

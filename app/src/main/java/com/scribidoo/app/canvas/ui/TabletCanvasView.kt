@@ -1,5 +1,6 @@
 package com.scribidoo.app.canvas.ui
 
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -11,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -21,14 +23,17 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.toSize
 import com.scribidoo.app.canvas.ink.InkPathGenerator
@@ -38,9 +43,13 @@ import com.scribidoo.app.canvas.input.InputVerdict
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.model.DrawingTool
 import com.scribidoo.app.canvas.model.ShapeModel
+import com.scribidoo.app.canvas.model.TextBoxModel
 import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.model.StrokeModel
 import com.scribidoo.app.canvas.state.CanvasState
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.hypot
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -49,6 +58,9 @@ fun TabletCanvasView(
     state: CanvasState,
     modifier: Modifier = Modifier
 ) {
+    val view = LocalView.current
+    val coroutineScope = rememberCoroutineScope()
+
     val inputClassifier = remember(state.palmConfig) {
         InputClassifier(state.palmConfig)
     }
@@ -57,6 +69,16 @@ fun TabletCanvasView(
     var previousFocalPoint by remember { mutableStateOf<Offset?>(null) }
     var previousSpan by remember { mutableFloatStateOf(0f) }
     var isViewportGestureActive by remember { mutableStateOf(false) }
+
+    // Text box transformation & selection states
+    var isMovingTextBox by remember { mutableStateOf(false) }
+    var isResizingTextBox by remember { mutableStateOf(false) }
+    var longPressJob by remember { mutableStateOf<Job?>(null) }
+    var initialTouchCanvas by remember { mutableStateOf(Offset.Zero) }
+    var lastTouchCanvas by remember { mutableStateOf(Offset.Zero) }
+    var initialFontSize by remember { mutableFloatStateOf(16f) }
+    var initialBoxWidth by remember { mutableFloatStateOf(100f) }
+    var pendingTouchTextBoxId by remember { mutableStateOf<String?>(null) }
 
     Box(
         modifier = modifier
@@ -72,6 +94,78 @@ fun TabletCanvasView(
                 when (motionEvent.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         isViewportGestureActive = false
+                        val screenPoint = Offset(motionEvent.x, motionEvent.y)
+                        val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+
+                        // 1. Check if tapping an ALREADY SELECTED text box (resize handle, pills, or inside to move)
+                        val selectedBox = state.currentPage.textBoxes.firstOrNull { it.id == state.selectedTextBoxId }
+                        if (selectedBox != null) {
+                            val bounds = getTextBoxBounds(selectedBox)
+                            val resizeCenter = Offset(bounds.right, bounds.bottom)
+                            val handleTouchDist = state.viewportState.screenToCanvasDist(36f)
+
+                            val dResize = canvasPoint - resizeCenter
+                            if (hypot(dResize.x, dResize.y) <= handleTouchDist) {
+                                isResizingTextBox = true
+                                isMovingTextBox = false
+                                lastTouchCanvas = canvasPoint
+                                initialTouchCanvas = canvasPoint
+                                initialFontSize = selectedBox.fontSizeSp
+                                initialBoxWidth = bounds.width.coerceAtLeast(30f)
+                                return@pointerInteropFilter true
+                            }
+
+                            val pillY = bounds.top - 28f
+                            val editRect = Rect(bounds.left, pillY - 4f, bounds.left + 50f, pillY + 24f)
+                            if (editRect.contains(canvasPoint)) {
+                                state.activeTextBoxForEdit = selectedBox
+                                state.selectedTextBoxId = null
+                                return@pointerInteropFilter true
+                            }
+
+                            val delRect = Rect(bounds.left + 54f, pillY - 4f, bounds.left + 106f, pillY + 24f)
+                            if (delRect.contains(canvasPoint)) {
+                                state.deleteTextBox(selectedBox.id)
+                                state.selectedTextBoxId = null
+                                return@pointerInteropFilter true
+                            }
+
+                            if (bounds.contains(canvasPoint)) {
+                                isMovingTextBox = true
+                                isResizingTextBox = false
+                                lastTouchCanvas = canvasPoint
+                                initialTouchCanvas = canvasPoint
+                                return@pointerInteropFilter true
+                            }
+
+                            // Tapped outside the selected box -> deselect
+                            state.selectedTextBoxId = null
+                        }
+
+                        // 2. Check if pressing down on ANY text box to initiate LONG-PRESS move & resize
+                        val hitBox = state.currentPage.textBoxes.lastOrNull { tb ->
+                            getTextBoxBounds(tb).contains(canvasPoint)
+                        }
+                        if (hitBox != null) {
+                            pendingTouchTextBoxId = hitBox.id
+                            initialTouchCanvas = canvasPoint
+                            lastTouchCanvas = canvasPoint
+                            longPressJob?.cancel()
+                            longPressJob = coroutineScope.launch {
+                                delay(380)
+                                // Long press triggered!
+                                state.selectedTextBoxId = hitBox.id
+                                isMovingTextBox = true
+                                if (state.activeStroke != null) {
+                                    state.cancelStroke()
+                                }
+                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            }
+                        } else {
+                            pendingTouchTextBoxId = null
+                            longPressJob?.cancel()
+                        }
+
                         val verdict = inputClassifier.evaluateTouch(
                             event = motionEvent,
                             pointerIndex = 0,
@@ -82,8 +176,6 @@ fun TabletCanvasView(
 
                         when (verdict) {
                             InputVerdict.ACCEPT_FOR_DRAWING -> {
-                                val screenPoint = Offset(motionEvent.x, motionEvent.y)
-                                val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
                                 val pressure = motionEvent.pressure.coerceIn(0.1f, 1.0f)
 
                                 when (state.currentTool) {
@@ -100,7 +192,10 @@ fun TabletCanvasView(
                                         state.startShape(canvasPoint)
                                     }
                                     DrawingTool.TEXT -> {
-                                        state.addTextBox(canvasPoint)
+                                        if (hitBox == null) {
+                                            state.activeTextBoxForEdit = null
+                                            state.pendingTextInsertPoint = canvasPoint
+                                        }
                                     }
                                     else -> {}
                                 }
@@ -116,8 +211,12 @@ fun TabletCanvasView(
                     }
 
                     MotionEvent.ACTION_POINTER_DOWN -> {
+                        longPressJob?.cancel()
+                        longPressJob = null
+                        isMovingTextBox = false
+                        isResizingTextBox = false
+
                         // Multi-touch entered (e.g. 2nd finger placed down)
-                        // If drawing was in progress with finger, cancel it in favor of navigation
                         if (state.activeStroke != null) {
                             state.cancelStroke()
                         }
@@ -133,6 +232,40 @@ fun TabletCanvasView(
                     }
 
                     MotionEvent.ACTION_MOVE -> {
+                        val screenPoint = Offset(motionEvent.x, motionEvent.y)
+                        val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+
+                        // Cancel pending long press if user moved finger before long-press timer elapsed
+                        if (pendingTouchTextBoxId != null && !isMovingTextBox && !isResizingTextBox) {
+                            val dTouch = canvasPoint - initialTouchCanvas
+                            val dist = hypot(dTouch.x, dTouch.y)
+                            if (dist > state.viewportState.screenToCanvasDist(12f)) {
+                                longPressJob?.cancel()
+                                longPressJob = null
+                                pendingTouchTextBoxId = null
+                            }
+                        }
+
+                        // Handle active text box moving
+                        if (isMovingTextBox && state.selectedTextBoxId != null) {
+                            val delta = canvasPoint - lastTouchCanvas
+                            lastTouchCanvas = canvasPoint
+                            state.moveTextBox(state.selectedTextBoxId!!, delta)
+                            return@pointerInteropFilter true
+                        }
+
+                        // Handle active text box resizing
+                        if (isResizingTextBox && state.selectedTextBoxId != null) {
+                            val selected = state.currentPage.textBoxes.firstOrNull { it.id == state.selectedTextBoxId }
+                            if (selected != null) {
+                                val bounds = getTextBoxBounds(selected)
+                                val currentWidth = (canvasPoint.x - bounds.left).coerceAtLeast(30f)
+                                val scale = currentWidth / initialBoxWidth
+                                state.resizeTextBox(selected.id, initialFontSize * scale)
+                            }
+                            return@pointerInteropFilter true
+                        }
+
                         if (isViewportGestureActive || pointerCount >= 2) {
                             // Viewport Pan & Pinch-Zoom
                             if (pointerCount >= 2) {
@@ -153,7 +286,6 @@ fun TabletCanvasView(
                                 previousFocalPoint = currentFocal
                                 previousSpan = currentSpan
                             } else if (pointerCount == 1 && previousFocalPoint != null) {
-                                // Single-finger panning (e.g., when Finger Drawing is OFF)
                                 val currentFocal = Offset(motionEvent.x, motionEvent.y)
                                 val delta = currentFocal - previousFocalPoint!!
                                 state.viewportState.panBy(delta)
@@ -170,8 +302,6 @@ fun TabletCanvasView(
                             )
 
                             if (verdict == InputVerdict.ACCEPT_FOR_DRAWING) {
-                                val screenPoint = Offset(motionEvent.x, motionEvent.y)
-                                val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
                                 val pressure = motionEvent.pressure.coerceIn(0.1f, 1.0f)
 
                                 when (state.currentTool) {
@@ -194,12 +324,33 @@ fun TabletCanvasView(
                     }
 
                     MotionEvent.ACTION_POINTER_UP -> {
-                        // One of the multi-touch fingers was lifted
                         previousFocalPoint = null
                         previousSpan = 0f
                     }
 
                     MotionEvent.ACTION_UP -> {
+                        longPressJob?.cancel()
+                        longPressJob = null
+
+                        if (isMovingTextBox || isResizingTextBox) {
+                            isMovingTextBox = false
+                            isResizingTextBox = false
+                            state.commitTransform()
+                            return@pointerInteropFilter true
+                        }
+
+                        // If released quickly on a text box without long-press:
+                        if (pendingTouchTextBoxId != null) {
+                            val tappedId = pendingTouchTextBoxId
+                            pendingTouchTextBoxId = null
+                            if (state.currentTool == DrawingTool.TEXT) {
+                                val tappedBox = state.currentPage.textBoxes.firstOrNull { it.id == tappedId }
+                                if (tappedBox != null) {
+                                    state.activeTextBoxForEdit = tappedBox
+                                }
+                            }
+                        }
+
                         if (isViewportGestureActive) {
                             isViewportGestureActive = false
                             previousFocalPoint = null
@@ -219,6 +370,11 @@ fun TabletCanvasView(
                     }
 
                     MotionEvent.ACTION_CANCEL -> {
+                        longPressJob?.cancel()
+                        longPressJob = null
+                        isMovingTextBox = false
+                        isResizingTextBox = false
+                        pendingTouchTextBoxId = null
                         state.cancelStroke()
                         state.activeShape = null
                         isViewportGestureActive = false
@@ -255,7 +411,7 @@ fun TabletCanvasView(
                         val bgBitmap = state.backgroundBitmaps[curPage.index]
                         if (bgBitmap != null) {
                             drawImage(
-                                image = bgBitmap.asImageBitmap(),
+                                image = bgBitmap,
                                 dstSize = IntSize(curPage.width.toInt(), curPage.height.toInt())
                             )
                         } else {
@@ -302,6 +458,13 @@ fun TabletCanvasView(
                 for (shape in allShapes) {
                     drawVectorShape(shape)
                 }
+
+                // 4. Text Boxes
+                drawTextBoxes(
+                    textBoxes = curPage.textBoxes,
+                    isTextToolActive = state.currentTool == DrawingTool.TEXT,
+                    selectedTextBoxId = state.activeTextBoxForEdit?.id
+                )
             }
         }
     }
@@ -438,5 +601,149 @@ private fun DrawScope.drawInfiniteGrid(viewport: com.scribidoo.app.canvas.viewpo
             y += gridSpacing
         }
         x += gridSpacing
+    }
+}
+
+fun getTextBoxBounds(tb: TextBoxModel): Rect {
+    val textPaint = android.graphics.Paint().apply {
+        textSize = tb.fontSizeSp * 2.2f
+        typeface = android.graphics.Typeface.DEFAULT
+    }
+    val textWidth = textPaint.measureText(tb.text).coerceAtLeast(60f)
+    val textHeight = tb.fontSizeSp * 2.4f
+    return Rect(
+        left = tb.x - 12f,
+        top = tb.y - textHeight - 6f,
+        right = tb.x + textWidth + 12f,
+        bottom = tb.y + 10f
+    )
+}
+
+private fun DrawScope.drawTextBoxes(
+    textBoxes: List<TextBoxModel>,
+    isTextToolActive: Boolean,
+    selectedTextBoxId: String?
+) {
+    for (tb in textBoxes) {
+        val bounds = getTextBoxBounds(tb)
+        val textPaint = android.graphics.Paint().apply {
+            isAntiAlias = true
+            color = tb.colorArgb
+            textSize = tb.fontSizeSp * 2.2f
+            typeface = android.graphics.Typeface.DEFAULT
+        }
+
+        val isSelected = tb.id == selectedTextBoxId
+
+        if (isSelected) {
+            // Selected Text Box: solid border, soft tint, corner handles, resize pill, and action buttons
+            drawRoundRect(
+                color = Color(0x222563EB),
+                topLeft = Offset(bounds.left, bounds.top),
+                size = Size(bounds.width, bounds.height),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
+            )
+            drawRoundRect(
+                color = Color(0xFF2563EB),
+                topLeft = Offset(bounds.left, bounds.top),
+                size = Size(bounds.width, bounds.height),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f),
+                style = Stroke(width = 2.5f)
+            )
+
+            // 3 Corner Dots (top-left, top-right, bottom-left)
+            val dotRadius = 4.5f
+            listOf(
+                Offset(bounds.left, bounds.top),
+                Offset(bounds.right, bounds.top),
+                Offset(bounds.left, bounds.bottom)
+            ).forEach { pt ->
+                drawCircle(color = Color.White, radius = dotRadius, center = pt)
+                drawCircle(color = Color(0xFF2563EB), radius = dotRadius, center = pt, style = Stroke(width = 1.5f))
+            }
+
+            // Bottom-right RESIZE HANDLE
+            val resizeCenter = Offset(bounds.right, bounds.bottom)
+            val resizeRadius = 9f
+            drawCircle(color = Color(0xFF2563EB), radius = resizeRadius, center = resizeCenter)
+            drawCircle(color = Color.White, radius = resizeRadius, center = resizeCenter, style = Stroke(width = 2f))
+            drawLine(
+                color = Color.White,
+                start = Offset(resizeCenter.x - 3.5f, resizeCenter.y - 3.5f),
+                end = Offset(resizeCenter.x + 3.5f, resizeCenter.y + 3.5f),
+                strokeWidth = 2f,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = Color.White,
+                start = Offset(resizeCenter.x + 3.5f, resizeCenter.y + 0.5f),
+                end = Offset(resizeCenter.x + 3.5f, resizeCenter.y + 3.5f),
+                strokeWidth = 2f,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = Color.White,
+                start = Offset(resizeCenter.x + 0.5f, resizeCenter.y + 3.5f),
+                end = Offset(resizeCenter.x + 3.5f, resizeCenter.y + 3.5f),
+                strokeWidth = 2f,
+                cap = StrokeCap.Round
+            )
+
+            // Top action buttons: [ Edit ]  [ Delete ]
+            val pillY = bounds.top - 28f
+            drawRoundRect(
+                color = Color(0xFF1E293B),
+                topLeft = Offset(bounds.left, pillY),
+                size = Size(50f, 22f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+            )
+            val editPaint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                color = android.graphics.Color.WHITE
+                textSize = 11f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            drawContext.canvas.nativeCanvas.drawText("Edit", bounds.left + 14f, pillY + 15f, editPaint)
+
+            drawRoundRect(
+                color = Color(0xFFDC2626),
+                topLeft = Offset(bounds.left + 54f, pillY),
+                size = Size(52f, 22f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+            )
+            val delPaint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                color = android.graphics.Color.WHITE
+                textSize = 11f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            drawContext.canvas.nativeCanvas.drawText("Delete", bounds.left + 64f, pillY + 15f, delPaint)
+
+        } else if (isTextToolActive) {
+            // Subtle dashed boundary when Text tool is active
+            drawRoundRect(
+                color = Color(0x12000000),
+                topLeft = Offset(bounds.left, bounds.top),
+                size = Size(bounds.width, bounds.height),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+            )
+            drawRoundRect(
+                color = Color(0x40000000),
+                topLeft = Offset(bounds.left, bounds.top),
+                size = Size(bounds.width, bounds.height),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f),
+                style = Stroke(
+                    width = 1.5f,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
+                )
+            )
+        }
+
+        drawContext.canvas.nativeCanvas.drawText(
+            tb.text,
+            tb.x,
+            tb.y,
+            textPaint
+        )
     }
 }

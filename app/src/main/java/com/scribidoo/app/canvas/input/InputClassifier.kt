@@ -15,20 +15,6 @@ enum class InputVerdict {
     DISCARD_PALM
 }
 
-enum class DominantHand {
-    RIGHT_HANDED,
-    LEFT_HANDED
-}
-
-data class PalmRejectionConfig(
-    val isFingerDrawingEnabled: Boolean = true, // Enabled by default for touch screens
-    val touchSizeThreshold: Float = 0.35f, // Slider: 0.15 to 0.60
-    val touchMajorThresholdPx: Float = 120f, // Slider: 60 to 260
-    val palmShieldBottomRatio: Float = 0.28f, // Slider: 0.0 to 0.50 (height exclusion)
-    val isPalmShieldActive: Boolean = true,
-    val dominantHand: DominantHand = DominantHand.RIGHT_HANDED
-)
-
 class InputClassifier(
     var config: PalmRejectionConfig = PalmRejectionConfig()
 ) {

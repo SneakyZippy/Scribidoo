@@ -2,14 +2,13 @@ package com.scribidoo.app.canvas.state
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toArgb
-import android.graphics.Bitmap
 import com.scribidoo.app.canvas.ink.EraserEngine
 import com.scribidoo.app.canvas.input.PalmRejectionConfig
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
@@ -32,7 +31,7 @@ class CanvasState(
         private set
 
     // Cache of page background bitmaps (from PDF or imported photo)
-    val backgroundBitmaps = mutableStateMapOf<Int, Bitmap>()
+    val backgroundBitmaps = mutableStateMapOf<Int, ImageBitmap>()
 
     var currentTool by mutableStateOf(DrawingTool.PEN)
     var currentShapeType by mutableStateOf(ShapeType.RECTANGLE)
@@ -43,6 +42,9 @@ class CanvasState(
     // Active in-progress items
     var activeStroke by mutableStateOf<StrokeModel?>(null)
     var activeShape by mutableStateOf<ShapeModel?>(null)
+    var activeTextBoxForEdit by mutableStateOf<TextBoxModel?>(null)
+    var pendingTextInsertPoint by mutableStateOf<Offset?>(null)
+    var selectedTextBoxId by mutableStateOf<String?>(null)
 
     // History for Undo / Redo
     private val undoStack = mutableListOf<DocumentModel>()
@@ -74,62 +76,44 @@ class CanvasState(
         document = redoStack.removeAt(redoStack.lastIndex)
     }
 
-    fun setLayoutMode(mode: CanvasLayoutMode) {
-        if (document.layoutMode == mode) return
-        pushHistory()
-        document = document.copy(layoutMode = mode)
-    }
-
-    fun toggleLayoutMode() {
-        setLayoutMode(
-            if (document.layoutMode == CanvasLayoutMode.PAGED) CanvasLayoutMode.INFINITE
-            else CanvasLayoutMode.PAGED
-        )
-    }
-
     fun toggleFingerDrawing() {
         palmConfig = palmConfig.copy(isFingerDrawingEnabled = !palmConfig.isFingerDrawingEnabled)
     }
 
-    fun startStroke(canvasPoint: Offset, pressure: Float) {
-        val isHighlighter = currentTool == DrawingTool.HIGHLIGHTER
-        val initialPoints = listOf(
-            SerializablePoint(
-                x = canvasPoint.x,
-                y = canvasPoint.y,
-                pressure = pressure
-            )
-        )
+    fun setLayoutMode(mode: CanvasLayoutMode) {
+        if (document.layoutMode != mode) {
+            pushHistory()
+            document = document.copy(layoutMode = mode, modifiedAt = System.currentTimeMillis())
+        }
+    }
+
+    fun startStroke(canvasPoint: Offset, pressure: Float = 0.5f) {
+        val basePoint = SerializablePoint(canvasPoint.x, canvasPoint.y, pressure)
         activeStroke = StrokeModel(
-            points = initialPoints,
+            points = listOf(basePoint),
             colorArgb = currentColor.toArgb(),
             strokeWidth = currentStrokeWidth,
-            alpha = if (isHighlighter) 0.45f else 1.0f,
-            isHighlighter = isHighlighter
+            isHighlighter = currentTool == DrawingTool.HIGHLIGHTER,
+            alpha = if (currentTool == DrawingTool.HIGHLIGHTER) 0.55f else 1.0f
         )
     }
 
-    fun appendStrokePoint(canvasPoint: Offset, pressure: Float) {
-        val current = activeStroke ?: return
-        val updatedPoints = current.points + SerializablePoint(
-            x = canvasPoint.x,
-            y = canvasPoint.y,
-            pressure = pressure
-        )
-        activeStroke = current.copy(points = updatedPoints)
+    fun appendStrokePoint(canvasPoint: Offset, pressure: Float = 0.5f) {
+        val stroke = activeStroke ?: return
+        val newPoint = SerializablePoint(canvasPoint.x, canvasPoint.y, pressure)
+        activeStroke = stroke.copy(points = stroke.points + newPoint)
     }
 
     fun finishStroke() {
         val stroke = activeStroke ?: return
         activeStroke = null
-        if (stroke.points.size >= 1) {
-            pushHistory()
-            val updatedPages = document.pages.toMutableList()
-            val curPage = currentPage
-            val updatedPage = curPage.copy(strokes = curPage.strokes + stroke)
-            updatedPages[document.activePageIndex] = updatedPage
-            document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
-        }
+        if (stroke.points.size < 2) return
+
+        pushHistory()
+        val curPage = currentPage
+        val updatedPages = document.pages.toMutableList()
+        updatedPages[document.activePageIndex] = curPage.copy(strokes = curPage.strokes + stroke)
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
     }
 
     fun cancelStroke() {
@@ -138,15 +122,26 @@ class CanvasState(
 
     fun eraseAt(canvasPoint: Offset, eraserRadius: Float) {
         val curPage = currentPage
+        // Also check if any text boxes intersect with eraser
+        val remainingTextBoxes = curPage.textBoxes.filterNot { tb ->
+            val dx = canvasPoint.x - tb.x
+            val dy = canvasPoint.y - tb.y
+            kotlin.math.hypot(dx, dy) <= (eraserRadius + 30f)
+        }
+        val textChanged = remainingTextBoxes.size != curPage.textBoxes.size
+
         when (currentTool) {
             DrawingTool.STROKE_ERASER -> {
                 val remainingStrokes = curPage.strokes.filterNot { stroke ->
                     EraserEngine.intersectsStroke(stroke, canvasPoint, eraserRadius)
                 }
-                if (remainingStrokes.size != curPage.strokes.size) {
+                if (remainingStrokes.size != curPage.strokes.size || textChanged) {
                     pushHistory()
                     val updatedPages = document.pages.toMutableList()
-                    updatedPages[document.activePageIndex] = curPage.copy(strokes = remainingStrokes)
+                    updatedPages[document.activePageIndex] = curPage.copy(
+                        strokes = remainingStrokes,
+                        textBoxes = remainingTextBoxes
+                    )
                     document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
                 }
             }
@@ -161,10 +156,13 @@ class CanvasState(
                         newStrokes.add(stroke)
                     }
                 }
-                if (changed) {
+                if (changed || textChanged) {
                     pushHistory()
                     val updatedPages = document.pages.toMutableList()
-                    updatedPages[document.activePageIndex] = curPage.copy(strokes = newStrokes)
+                    updatedPages[document.activePageIndex] = curPage.copy(
+                        strokes = newStrokes,
+                        textBoxes = remainingTextBoxes
+                    )
                     document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
                 }
             }
@@ -199,7 +197,13 @@ class CanvasState(
         document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
     }
 
-    fun addTextBox(canvasPoint: Offset, text: String = "Tap to edit") {
+    fun addTextBox(
+        canvasPoint: Offset,
+        text: String,
+        fontSizeSp: Float = 20f,
+        colorArgb: Int = currentColor.toArgb()
+    ) {
+        if (text.isBlank()) return
         pushHistory()
         val curPage = currentPage
         val updatedPages = document.pages.toMutableList()
@@ -207,10 +211,62 @@ class CanvasState(
             x = canvasPoint.x,
             y = canvasPoint.y,
             text = text,
-            colorArgb = currentColor.toArgb()
+            fontSizeSp = fontSizeSp,
+            colorArgb = colorArgb
         )
         updatedPages[document.activePageIndex] = curPage.copy(textBoxes = curPage.textBoxes + textBox)
         document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+    }
+
+    fun updateTextBox(id: String, newText: String, fontSizeSp: Float, colorArgb: Int) {
+        if (newText.isBlank()) {
+            deleteTextBox(id)
+            return
+        }
+        pushHistory()
+        val curPage = currentPage
+        val updatedPages = document.pages.toMutableList()
+        val updatedBoxes = curPage.textBoxes.map {
+            if (it.id == id) it.copy(text = newText, fontSizeSp = fontSizeSp, colorArgb = colorArgb) else it
+        }
+        updatedPages[document.activePageIndex] = curPage.copy(textBoxes = updatedBoxes)
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+    }
+
+    fun deleteTextBox(id: String) {
+        pushHistory()
+        val curPage = currentPage
+        val updatedPages = document.pages.toMutableList()
+        val updatedBoxes = curPage.textBoxes.filterNot { it.id == id }
+        updatedPages[document.activePageIndex] = curPage.copy(textBoxes = updatedBoxes)
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+        if (selectedTextBoxId == id) {
+            selectedTextBoxId = null
+        }
+    }
+
+    fun moveTextBox(id: String, deltaCanvas: Offset) {
+        val curPage = currentPage
+        val updatedPages = document.pages.toMutableList()
+        val updatedBoxes = curPage.textBoxes.map {
+            if (it.id == id) it.copy(x = it.x + deltaCanvas.x, y = it.y + deltaCanvas.y) else it
+        }
+        updatedPages[document.activePageIndex] = curPage.copy(textBoxes = updatedBoxes)
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+    }
+
+    fun resizeTextBox(id: String, newFontSize: Float) {
+        val curPage = currentPage
+        val updatedPages = document.pages.toMutableList()
+        val updatedBoxes = curPage.textBoxes.map {
+            if (it.id == id) it.copy(fontSizeSp = newFontSize.coerceIn(10f, 96f)) else it
+        }
+        updatedPages[document.activePageIndex] = curPage.copy(textBoxes = updatedBoxes)
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+    }
+
+    fun commitTransform() {
+        pushHistory()
     }
 
     fun clearPage() {
@@ -241,7 +297,19 @@ class CanvasState(
         }
     }
 
-    fun setBackgroundBitmap(pageIndex: Int, bitmap: Bitmap) {
+    fun prevPage() {
+        if (document.activePageIndex > 0) {
+            setActivePage(document.activePageIndex - 1)
+        }
+    }
+
+    fun nextPage() {
+        if (document.activePageIndex < document.pages.size - 1) {
+            setActivePage(document.activePageIndex + 1)
+        }
+    }
+
+    fun setBackgroundBitmap(pageIndex: Int, bitmap: ImageBitmap) {
         backgroundBitmaps[pageIndex] = bitmap
     }
 

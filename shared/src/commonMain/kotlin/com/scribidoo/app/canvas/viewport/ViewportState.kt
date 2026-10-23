@@ -66,10 +66,6 @@ class ViewportState(
         val newScale = (oldScale * zoomFactor).coerceIn(minScale, maxScale)
         if (oldScale == newScale) return
 
-        // Keep the canvas point under focalPoint stationary:
-        // focalPoint = canvasPoint * oldScale + oldPan
-        // focalPoint = canvasPoint * newScale + newPan
-        // => newPan = focalPoint - (focalPoint - oldPan) * (newScale / oldScale)
         val scaleRatio = newScale / oldScale
         panX = focalPoint.x - (focalPoint.x - panX) * scaleRatio
         panY = focalPoint.y - (focalPoint.y - panY) * scaleRatio

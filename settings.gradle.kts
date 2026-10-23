@@ -31,3 +31,4 @@ plugins {
 
 rootProject.name = "Scribidoo"
 include(":app")
+include(":desktop")

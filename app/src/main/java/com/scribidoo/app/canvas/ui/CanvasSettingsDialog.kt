@@ -56,6 +56,16 @@ fun CanvasSettingsDialog(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
+    val onResetDefaults = {
+        val defaults = PalmRejectionConfig()
+        fingerDraw = defaults.isFingerDrawingEnabled
+        touchSize = defaults.touchSizeThreshold
+        touchMajor = defaults.touchMajorThresholdPx
+        shieldRatio = defaults.palmShieldBottomRatio
+        dominantHand = defaults.dominantHand
+        layoutMode = CanvasLayoutMode.PAGED
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.widthIn(max = if (isLandscape) 640.dp else 400.dp),
@@ -321,8 +331,16 @@ fun CanvasSettingsDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onResetDefaults) {
+                    Text("Reset Defaults", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
             }
         }
     )

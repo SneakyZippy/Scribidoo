@@ -29,12 +29,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CropSquare
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.HorizontalSplit
 import androidx.compose.material.icons.filled.ModeEdit
 import androidx.compose.material.icons.filled.PanTool
-import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -149,31 +150,56 @@ fun FloatingToolPalette(
                     TactileGrip(isHorizontal = true, modifier = dragModifier)
 
                     // Core Drawing Tools
-                    PaletteToolsContent(
+                    PenTool(state)
+                    HighlighterTool(state)
+                    EraserTool(state)
+                    ShapeTool(
+                        state = state,
+                        showShapeMenu = showShapeMenu,
+                        onShowShapeMenuChange = { showShapeMenu = it }
+                    )
+                    TextTool(state)
+
+                    DividerItem(orientation)
+
+                    ColorTool(
                         state = state,
                         presetColors = presetColors,
                         showColorMenu = showColorMenu,
-                        onShowColorMenuChange = { showColorMenu = it },
-                        showWidthMenu = showWidthMenu,
-                        onShowWidthMenuChange = { showWidthMenu = it },
-                        showShapeMenu = showShapeMenu,
-                        onShowShapeMenuChange = { showShapeMenu = it },
-                        orientation = orientation,
-                        onToggleOrientation = { orientation = ToolbarOrientation.VERTICAL },
-                        onOpenSettings = onOpenSettings
+                        onShowColorMenuChange = { showColorMenu = it }
                     )
+                    WidthTool(
+                        state = state,
+                        showWidthMenu = showWidthMenu,
+                        onShowWidthMenuChange = { showWidthMenu = it }
+                    )
+
+                    DividerItem(orientation)
+
+                    FingerTool(state)
+                    UndoTool(state)
+                    RedoTool(state)
+                    FitTool(state)
+
+                    DividerItem(orientation)
+
+                    OrientationTool(
+                        targetOrientation = ToolbarOrientation.VERTICAL,
+                        onToggleOrientation = { orientation = ToolbarOrientation.VERTICAL }
+                    )
+                    SettingsTool(onOpenSettings = onOpenSettings)
                 }
 
                 // Status row
                 HorizontalStatusRow(state)
             }
         } else {
-            // Vertical Layout (Side dock rail)
+            // Vertical Layout (2-Column compact grid)
             Column(
                 modifier = Modifier
                     .padding(vertical = 6.dp, horizontal = 6.dp)
-                    .width(52.dp)
-                    .heightIn(max = 480.dp),
+                    .width(88.dp)
+                    .heightIn(max = 440.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Top drag pill handle
@@ -181,13 +207,13 @@ fun FloatingToolPalette(
                     modifier = Modifier
                         .then(dragModifier)
                         .padding(bottom = 6.dp)
-                        .width(36.dp)
-                        .height(10.dp),
+                        .width(44.dp)
+                        .height(12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(28.dp)
+                            .width(36.dp)
                             .height(4.dp)
                             .background(
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
@@ -204,19 +230,85 @@ fun FloatingToolPalette(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    PaletteToolsContent(
-                        state = state,
-                        presetColors = presetColors,
-                        showColorMenu = showColorMenu,
-                        onShowColorMenuChange = { showColorMenu = it },
-                        showWidthMenu = showWidthMenu,
-                        onShowWidthMenuChange = { showWidthMenu = it },
-                        showShapeMenu = showShapeMenu,
-                        onShowShapeMenuChange = { showShapeMenu = it },
-                        orientation = orientation,
-                        onToggleOrientation = { orientation = ToolbarOrientation.HORIZONTAL },
-                        onOpenSettings = onOpenSettings
+                    // Row 1: Pen + Highlighter
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        PenTool(state)
+                        HighlighterTool(state)
+                    }
+
+                    // Row 2: Eraser + Shapes
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        EraserTool(state)
+                        ShapeTool(
+                            state = state,
+                            showShapeMenu = showShapeMenu,
+                            onShowShapeMenuChange = { showShapeMenu = it }
+                        )
+                    }
+
+                    // Row 3: Text + Color
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextTool(state)
+                        ColorTool(
+                            state = state,
+                            presetColors = presetColors,
+                            showColorMenu = showColorMenu,
+                            onShowColorMenuChange = { showColorMenu = it }
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(68.dp)
+                            .height(1.dp)
+                            .background(Color(0x1F000000))
                     )
+
+                    // Row 4: Width + Finger Toggle
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        WidthTool(
+                            state = state,
+                            showWidthMenu = showWidthMenu,
+                            onShowWidthMenuChange = { showWidthMenu = it }
+                        )
+                        FingerTool(state)
+                    }
+
+                    // Row 5: Undo + Redo
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        UndoTool(state)
+                        RedoTool(state)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(68.dp)
+                            .height(1.dp)
+                            .background(Color(0x1F000000))
+                    )
+
+                    // Row 6: Fit Screen + Flip Orientation
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FitTool(state)
+                        OrientationTool(
+                            targetOrientation = ToolbarOrientation.HORIZONTAL,
+                            onToggleOrientation = { orientation = ToolbarOrientation.HORIZONTAL }
+                        )
+                    }
+
+                    // Row 7: Settings
+                    Row(
+                        modifier = Modifier.width(76.dp),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        SettingsTool(onOpenSettings = onOpenSettings)
+                    }
                 }
 
                 // Bottom grip handle
@@ -224,13 +316,13 @@ fun FloatingToolPalette(
                     modifier = Modifier
                         .then(dragModifier)
                         .padding(top = 6.dp)
-                        .width(36.dp)
-                        .height(10.dp),
+                        .width(44.dp)
+                        .height(12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(28.dp)
+                            .width(36.dp)
                             .height(4.dp)
                             .background(
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
@@ -244,36 +336,27 @@ fun FloatingToolPalette(
 }
 
 @Composable
-private fun PaletteToolsContent(
-    state: CanvasState,
-    presetColors: List<Color>,
-    showColorMenu: Boolean,
-    onShowColorMenuChange: (Boolean) -> Unit,
-    showWidthMenu: Boolean,
-    onShowWidthMenuChange: (Boolean) -> Unit,
-    showShapeMenu: Boolean,
-    onShowShapeMenuChange: (Boolean) -> Unit,
-    orientation: ToolbarOrientation,
-    onToggleOrientation: () -> Unit,
-    onOpenSettings: () -> Unit
-) {
-    // 1. Pen Tool
+private fun PenTool(state: CanvasState) {
     ToolButton(
         icon = Icons.Default.ModeEdit,
         label = "Pen",
         isSelected = state.currentTool == DrawingTool.PEN,
         onClick = { state.currentTool = DrawingTool.PEN }
     )
+}
 
-    // 2. Highlighter Tool (Chisel-Tip Marker)
+@Composable
+private fun HighlighterTool(state: CanvasState) {
     ToolButton(
         painter = painterResource(id = R.drawable.ic_highlighter_marker),
         label = "Highlighter Marker",
         isSelected = state.currentTool == DrawingTool.HIGHLIGHTER,
         onClick = { state.currentTool = DrawingTool.HIGHLIGHTER }
     )
+}
 
-    // 3. Rubber Eraser Tool (Switches between Stroke and Precision Segment)
+@Composable
+private fun EraserTool(state: CanvasState) {
     val isSegmentEraser = state.currentTool == DrawingTool.SEGMENT_ERASER
     val isEraserActive = state.currentTool == DrawingTool.STROKE_ERASER || isSegmentEraser
     ToolButton(
@@ -290,8 +373,14 @@ private fun PaletteToolsContent(
             }
         }
     )
+}
 
-    // 4. Shapes Tool
+@Composable
+private fun ShapeTool(
+    state: CanvasState,
+    showShapeMenu: Boolean,
+    onShowShapeMenuChange: (Boolean) -> Unit
+) {
     Box {
         ToolButton(
             icon = Icons.Default.CropSquare,
@@ -340,19 +429,26 @@ private fun PaletteToolsContent(
             )
         }
     }
+}
 
-    // 5. Text Box Tool
+@Composable
+private fun TextTool(state: CanvasState) {
     ToolButton(
         icon = Icons.Default.TextFields,
         label = "Text Box",
         isSelected = state.currentTool == DrawingTool.TEXT,
         onClick = { state.currentTool = DrawingTool.TEXT }
     )
+}
 
-    DividerItem(orientation)
-
-    // 6. Color Swatch Button
-    Box {
+@Composable
+private fun ColorTool(
+    state: CanvasState,
+    presetColors: List<Color>,
+    showColorMenu: Boolean,
+    onShowColorMenuChange: (Boolean) -> Unit
+) {
+    Box(contentAlignment = Alignment.Center) {
         Box(
             modifier = Modifier
                 .size(30.dp)
@@ -387,12 +483,18 @@ private fun PaletteToolsContent(
             }
         }
     }
+}
 
-    // 7. Stroke Width Selector
-    Box {
+@Composable
+private fun WidthTool(
+    state: CanvasState,
+    showWidthMenu: Boolean,
+    onShowWidthMenuChange: (Boolean) -> Unit
+) {
+    Box(contentAlignment = Alignment.Center) {
         IconButton(
             onClick = { onShowWidthMenuChange(!showWidthMenu) },
-            modifier = Modifier.size(34.dp)
+            modifier = Modifier.size(36.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -415,15 +517,15 @@ private fun PaletteToolsContent(
             }
         }
     }
+}
 
-    DividerItem(orientation)
-
-    // 8. Finger Drawing / Stylus Toggle
+@Composable
+private fun FingerTool(state: CanvasState) {
     val fingerDrawOn = state.palmConfig.isFingerDrawingEnabled
     IconButton(
         onClick = { state.toggleFingerDrawing() },
         modifier = Modifier
-            .size(34.dp)
+            .size(36.dp)
             .background(
                 if (fingerDrawOn) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
                 else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
@@ -437,12 +539,14 @@ private fun PaletteToolsContent(
             modifier = Modifier.size(19.dp)
         )
     }
+}
 
-    // 9. Undo / Redo
+@Composable
+private fun UndoTool(state: CanvasState) {
     IconButton(
         onClick = { state.undo() },
         enabled = state.canUndo,
-        modifier = Modifier.size(34.dp)
+        modifier = Modifier.size(36.dp)
     ) {
         Icon(
             imageVector = Icons.AutoMirrored.Filled.Undo,
@@ -451,11 +555,14 @@ private fun PaletteToolsContent(
             modifier = Modifier.size(19.dp)
         )
     }
+}
 
+@Composable
+private fun RedoTool(state: CanvasState) {
     IconButton(
         onClick = { state.redo() },
         enabled = state.canRedo,
-        modifier = Modifier.size(34.dp)
+        modifier = Modifier.size(36.dp)
     ) {
         Icon(
             imageVector = Icons.AutoMirrored.Filled.Redo,
@@ -464,14 +571,16 @@ private fun PaletteToolsContent(
             modifier = Modifier.size(19.dp)
         )
     }
+}
 
-    // 10. Fit Screen / Center Page
+@Composable
+private fun FitTool(state: CanvasState) {
     IconButton(
         onClick = {
             val curPage = state.currentPage
             state.viewportState.centerAndFit(curPage.width, curPage.height)
         },
-        modifier = Modifier.size(34.dp)
+        modifier = Modifier.size(36.dp)
     ) {
         Icon(
             imageVector = Icons.Default.FitScreen,
@@ -480,26 +589,41 @@ private fun PaletteToolsContent(
             modifier = Modifier.size(19.dp)
         )
     }
+}
 
-    DividerItem(orientation)
-
-    // 11. Flip Orientation Button (Horizontal <-> Vertical)
+@Composable
+private fun OrientationTool(
+    targetOrientation: ToolbarOrientation,
+    onToggleOrientation: () -> Unit
+) {
     IconButton(
         onClick = onToggleOrientation,
-        modifier = Modifier.size(34.dp)
+        modifier = Modifier.size(36.dp)
     ) {
+        val icon = if (targetOrientation == ToolbarOrientation.VERTICAL) {
+            Icons.Default.VerticalSplit
+        } else {
+            Icons.Default.HorizontalSplit
+        }
+        val description = if (targetOrientation == ToolbarOrientation.VERTICAL) {
+            "Switch Toolbar to Vertical Dock"
+        } else {
+            "Switch Toolbar to Horizontal Bar"
+        }
         Icon(
-            imageVector = Icons.Default.ScreenRotation,
-            contentDescription = "Switch Orientation (Horizontal/Vertical)",
+            imageVector = icon,
+            contentDescription = description,
             tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(20.dp)
         )
     }
+}
 
-    // 12. Settings / Palm Rejection Config Button
+@Composable
+private fun SettingsTool(onOpenSettings: () -> Unit) {
     IconButton(
         onClick = onOpenSettings,
-        modifier = Modifier.size(34.dp)
+        modifier = Modifier.size(36.dp)
     ) {
         Icon(
             imageVector = Icons.Default.Settings,
