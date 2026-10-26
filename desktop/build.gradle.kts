@@ -29,6 +29,7 @@ kotlin {
 compose.desktop {
     application {
         mainClass = "com.scribidoo.desktop.MainKt"
+        javaHome = "C:/Program Files/Java/jdk-23"
         nativeDistributions {
             targetFormats(
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
