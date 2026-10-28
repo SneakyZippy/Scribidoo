@@ -1,5 +1,6 @@
 package com.scribidoo.app.canvas.ui
 
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,9 +24,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -54,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -62,14 +71,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
+import com.scribidoo.app.canvas.model.DocumentModel
 import com.scribidoo.app.canvas.state.CanvasState
 import com.scribidoo.app.data.DocumentStorageManager
 import com.scribidoo.app.export.CanvasExporter
+import com.scribidoo.app.media.AudioExtendedMenuDialog
+import com.scribidoo.app.media.VoiceRecorderDialog
 import com.scribidoo.app.pdf.PdfDocumentManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.UUID
 
 @Composable
 fun CanvasWorkspaceScreen(
@@ -103,6 +118,103 @@ fun CanvasWorkspaceScreen(
                     Toast.makeText(context, "Loaded PDF (${count} pages)", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(context, "Failed to load PDF: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    // Camera photo capture
+    var activeCameraFile by remember { mutableStateOf<File?>(null) }
+    var activeCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val file = activeCameraFile
+        if (success && file != null && file.exists() && file.length() > 0) {
+            val center = state.viewportState.screenToCanvas(
+                Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
+            )
+            state.addImage(file.absolutePath, 500f, 400f, center)
+            Toast.makeText(context, "Photo added to note", Toast.LENGTH_SHORT).show()
+        }
+        activeCameraFile = null
+        activeCameraUri = null
+    }
+
+    // Gallery picture picker
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                val file = copyUriToInternalFile(context, uri, "images", "img_${UUID.randomUUID()}.png")
+                if (file != null && file.exists()) {
+                    val center = state.viewportState.screenToCanvas(
+                        Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
+                    )
+                    state.addImage(file.absolutePath, 500f, 400f, center)
+                    Toast.makeText(context, "Picture added", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Audio file picker
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                val file = copyUriToInternalFile(context, uri, "audio", "audio_${UUID.randomUUID()}.m4a")
+                if (file != null && file.exists()) {
+                    val center = state.viewportState.screenToCanvas(
+                        Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
+                    )
+                    state.addAudioNote(file.absolutePath, 10000L, center, "Audio Clip")
+                    Toast.makeText(context, "Audio note added", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // JSON Note Export launcher
+    val jsonExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val jsonStr = Json {
+                        prettyPrint = true
+                        ignoreUnknownKeys = true
+                    }.encodeToString(DocumentModel.serializer(), state.document)
+                    context.contentResolver.openOutputStream(uri)?.use {
+                        it.write(jsonStr.toByteArray(Charsets.UTF_8))
+                    }
+                    Toast.makeText(context, "Note exported to JSON", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Export error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    // JSON Note Import launcher
+    val jsonImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val jsonStr = context.contentResolver.openInputStream(uri)?.use { it.reader().readText() } ?: ""
+                    val importedDoc = Json {
+                        ignoreUnknownKeys = true
+                    }.decodeFromString(DocumentModel.serializer(), jsonStr)
+                    state.loadDocument(importedDoc)
+                    Toast.makeText(context, "Imported '${importedDoc.title}'", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Import failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -238,6 +350,20 @@ fun CanvasWorkspaceScreen(
                             modifier = Modifier.size(16.dp)
                         )
                     }
+                    IconButton(
+                        onClick = {
+                            state.addNewPage()
+                            Toast.makeText(context, "Added Page ${state.document.pages.size}", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add New Page",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
 
                 Box(
@@ -274,6 +400,31 @@ fun CanvasWorkspaceScreen(
                                     storageManager.saveDocument(state.document)
                                     Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
                                 }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add New Page") },
+                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) },
+                            onClick = {
+                                showMenu = false
+                                state.addNewPage()
+                                Toast.makeText(context, "Added Page ${state.document.pages.size}", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Export Note (JSON)") },
+                            leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                            onClick = {
+                                showMenu = false
+                                jsonExportLauncher.launch("${state.document.title.replace(" ", "_")}.json")
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Import Note (JSON)") },
+                            leadingIcon = { Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                            onClick = {
+                                showMenu = false
+                                jsonImportLauncher.launch(arrayOf("application/json", "*/*"))
                             }
                         )
                         DropdownMenuItem(
@@ -430,6 +581,116 @@ fun CanvasWorkspaceScreen(
                 state.pendingTextInsertPoint = null
             }
         )
+    }
+
+    // Voice Recorder Dialog
+    if (state.showVoiceRecorderDialog) {
+        VoiceRecorderDialog(
+            onDismiss = { state.showVoiceRecorderDialog = false },
+            onAttach = { filePath, durationMs, title ->
+                val center = state.viewportState.screenToCanvas(
+                    Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
+                )
+                state.addAudioNote(filePath, durationMs, center, title)
+                state.showVoiceRecorderDialog = false
+            }
+        )
+    }
+
+    // Audio Extended Menu Dialog
+    if (state.activeAudioForMenu != null) {
+        val targetAudio = state.activeAudioForMenu!!
+        AudioExtendedMenuDialog(
+            audioNote = targetAudio,
+            onDismiss = { state.activeAudioForMenu = null },
+            onSaveTrimAndRename = { newTitle, trimStartMs, trimEndMs ->
+                state.renameAudioNote(targetAudio.id, newTitle)
+                state.updateAudioTrim(targetAudio.id, trimStartMs, trimEndMs)
+                state.activeAudioForMenu = null
+            },
+            onDelete = {
+                state.deleteAudioNote(targetAudio.id)
+                state.activeAudioForMenu = null
+            }
+        )
+    }
+
+    // Image Source Picker Dialog (Camera or Gallery)
+    if (state.showImageSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { state.showImageSourceDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Text("Insert Picture", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Choose how to add an image to your canvas:",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = {
+                            state.showImageSourceDialog = false
+                            val imagesDir = File(context.filesDir, "images").apply { mkdirs() }
+                            val photoFile = File(imagesDir, "photo_${UUID.randomUUID()}.jpg")
+                            activeCameraFile = photoFile
+                            val photoUri = FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                photoFile
+                            )
+                            activeCameraUri = photoUri
+                            cameraLauncher.launch(photoUri)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Take Photo with Camera")
+                    }
+                    Button(
+                        onClick = {
+                            state.showImageSourceDialog = false
+                            galleryLauncher.launch("image/*")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Choose from Gallery / Files")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { state.showImageSourceDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+private fun copyUriToInternalFile(context: android.content.Context, uri: Uri, subDir: String, targetFileName: String): File? {
+    return try {
+        val destDir = File(context.filesDir, subDir).apply { mkdirs() }
+        val destFile = File(destDir, targetFileName)
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            destFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        destFile
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
     }
 }
 

@@ -64,6 +64,9 @@ class CanvasExporter(private val context: Context) {
                 canvas.drawColor(android.graphics.Color.WHITE)
             }
 
+            // 1b. Draw Imported Images
+            renderImagesToAndroidCanvas(canvas, page.images)
+
             // 2. Draw Vector Strokes
             renderStrokesToAndroidCanvas(canvas, page.strokes)
 
@@ -106,6 +109,7 @@ class CanvasExporter(private val context: Context) {
             canvas.drawColor(android.graphics.Color.WHITE)
         }
 
+        renderImagesToAndroidCanvas(canvas, page.images)
         renderStrokesToAndroidCanvas(canvas, page.strokes)
         renderShapesToAndroidCanvas(canvas, page.shapes)
         renderTextBoxesToAndroidCanvas(canvas, page.textBoxes)
@@ -236,6 +240,19 @@ class CanvasExporter(private val context: Context) {
                     val right = maxOf(shape.startX, shape.endX)
                     val bottom = maxOf(shape.startY, shape.endY)
                     canvas.drawOval(left, top, right, bottom, paint)
+                }
+            }
+        }
+    }
+
+    private fun renderImagesToAndroidCanvas(canvas: Canvas, images: List<com.scribidoo.app.canvas.model.ImageModel>) {
+        for (img in images) {
+            val file = File(img.localPath)
+            if (file.exists()) {
+                val bmp = android.graphics.BitmapFactory.decodeFile(img.localPath)
+                if (bmp != null) {
+                    val destRect = android.graphics.RectF(img.x, img.y, img.x + img.width, img.y + img.height)
+                    canvas.drawBitmap(bmp, null, destRect, null)
                 }
             }
         }

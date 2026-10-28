@@ -52,6 +52,8 @@ fun CanvasSettingsDialog(
     var shieldRatio by remember { mutableFloatStateOf(state.palmConfig.palmShieldBottomRatio) }
     var dominantHand by remember { mutableStateOf(state.palmConfig.dominantHand) }
     var layoutMode by remember { mutableStateOf(state.document.layoutMode) }
+    var constrainDrawing by remember { mutableStateOf(state.palmConfig.constrainDrawingToPage) }
+    var hiddenTools by remember { mutableStateOf(state.palmConfig.hiddenTools) }
 
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -64,6 +66,8 @@ fun CanvasSettingsDialog(
         shieldRatio = defaults.palmShieldBottomRatio
         dominantHand = defaults.dominantHand
         layoutMode = CanvasLayoutMode.PAGED
+        constrainDrawing = false
+        hiddenTools = emptySet()
     }
 
     AlertDialog(
@@ -196,6 +200,24 @@ fun CanvasSettingsDialog(
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
+                        // Constrain drawing to paper
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Constrain Drawing to Paper", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                Text("Margin touches pan; ink clipped to edges", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = constrainDrawing,
+                                onCheckedChange = { constrainDrawing = it }
+                            )
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
                         Text(
                             text = "CANVAS MODE",
                             fontSize = 10.sp,
@@ -219,6 +241,25 @@ fun CanvasSettingsDialog(
                                 onClick = { layoutMode = CanvasLayoutMode.INFINITE },
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                        Text(
+                            text = "TOOLBAR CUSTOMIZATION",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Long-press any tool icon on the toolbar to hide it. Tap below to reset:",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(
+                            onClick = { hiddenTools = emptySet() }
+                        ) {
+                            Text("Show All Toolbar Tools")
                         }
                     }
                 }
@@ -292,6 +333,24 @@ fun CanvasSettingsDialog(
 
                     HorizontalDivider()
 
+                    // Constrain drawing to paper
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Constrain Drawing to Paper", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text("Margin touches pan canvas; strokes clipped to edges", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = constrainDrawing,
+                            onCheckedChange = { constrainDrawing = it }
+                        )
+                    }
+
+                    HorizontalDivider()
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -309,6 +368,28 @@ fun CanvasSettingsDialog(
                             modifier = Modifier.weight(1f)
                         )
                     }
+
+                    HorizontalDivider()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Toolbar Tools", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (hiddenTools.isEmpty()) "All tools are visible" else "${hiddenTools.size} tool(s) hidden",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (hiddenTools.isNotEmpty()) {
+                            TextButton(onClick = { hiddenTools = emptySet() }) {
+                                Text("Unhide All")
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -321,7 +402,9 @@ fun CanvasSettingsDialog(
                         touchMajorThresholdPx = touchMajor,
                         palmShieldBottomRatio = shieldRatio,
                         isPalmShieldActive = shieldRatio > 0.01f,
-                        dominantHand = dominantHand
+                        dominantHand = dominantHand,
+                        constrainDrawingToPage = constrainDrawing,
+                        hiddenTools = hiddenTools
                     )
                     state.setLayoutMode(layoutMode)
                     onDismiss()

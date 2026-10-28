@@ -3,6 +3,7 @@ package com.scribidoo.app.canvas.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -28,8 +29,10 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CropSquare
 import androidx.compose.material.icons.filled.FitScreen
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.HorizontalSplit
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.ModeEdit
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Settings
@@ -38,6 +41,7 @@ import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -160,6 +164,8 @@ fun FloatingToolPalette(
                         onShowShapeMenuChange = { showShapeMenu = it }
                     )
                     TextTool(state)
+                    ImageTool(state)
+                    AudioTool(state)
 
                     DividerItem(orientation)
 
@@ -181,6 +187,7 @@ fun FloatingToolPalette(
                     UndoTool(state)
                     RedoTool(state)
                     FitTool(state)
+                    RestoreHiddenToolsButton(state)
 
                     DividerItem(orientation)
 
@@ -232,11 +239,13 @@ fun FloatingToolPalette(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     // Row 1: Pan / Hand Tool
-                    Row(
-                        modifier = Modifier.width(76.dp),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        HandTool(state)
+                    if (!state.isToolHidden(DrawingTool.HAND)) {
+                        Row(
+                            modifier = Modifier.width(76.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            HandTool(state)
+                        }
                     }
 
                     // Row 2: Pen + Highlighter
@@ -245,7 +254,7 @@ fun FloatingToolPalette(
                         HighlighterTool(state)
                     }
 
-                    // Row 2: Eraser + Shapes
+                    // Row 3: Eraser + Shapes
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         EraserTool(state)
                         ShapeTool(
@@ -255,7 +264,7 @@ fun FloatingToolPalette(
                         )
                     }
 
-                    // Row 3: Text + Color
+                    // Row 4: Text + Color
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -269,6 +278,15 @@ fun FloatingToolPalette(
                         )
                     }
 
+                    // Row 5: Picture + Audio Note
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ImageTool(state)
+                        AudioTool(state)
+                    }
+
                     Box(
                         modifier = Modifier
                             .width(68.dp)
@@ -276,7 +294,7 @@ fun FloatingToolPalette(
                             .background(Color(0x1F000000))
                     )
 
-                    // Row 4: Width + Finger Toggle
+                    // Row 6: Width + Finger Toggle
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -289,7 +307,7 @@ fun FloatingToolPalette(
                         FingerTool(state)
                     }
 
-                    // Row 5: Undo + Redo
+                    // Row 7: Undo + Redo
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         UndoTool(state)
                         RedoTool(state)
@@ -302,20 +320,18 @@ fun FloatingToolPalette(
                             .background(Color(0x1F000000))
                     )
 
-                    // Row 6: Fit Screen + Flip Orientation
+                    // Row 8: Fit Screen + Restore Hidden Tools
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         FitTool(state)
+                        RestoreHiddenToolsButton(state)
+                    }
+
+                    // Row 9: Flip Orientation + Settings
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         OrientationTool(
                             targetOrientation = ToolbarOrientation.HORIZONTAL,
                             onToggleOrientation = { orientation = ToolbarOrientation.HORIZONTAL }
                         )
-                    }
-
-                    // Row 7: Settings
-                    Row(
-                        modifier = Modifier.width(76.dp),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
                         SettingsTool(onOpenSettings = onOpenSettings)
                     }
                 }
@@ -345,31 +361,166 @@ fun FloatingToolPalette(
 }
 
 @Composable
+private fun HideableToolButton(
+    tool: DrawingTool,
+    icon: ImageVector? = null,
+    painter: Painter? = null,
+    label: String,
+    isSelected: Boolean,
+    state: CanvasState,
+    onClick: () -> Unit
+) {
+    if (state.isToolHidden(tool)) return
+    var showContextMenu by remember { mutableStateOf(false) }
+
+    Box {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .pointerInput(tool) {
+                    detectTapGestures(
+                        onTap = { onClick() },
+                        onLongPress = { showContextMenu = true }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else if (painter != null) {
+                Icon(
+                    painter = painter,
+                    contentDescription = label,
+                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Hide '$label'") },
+                onClick = {
+                    showContextMenu = false
+                    state.hideTool(tool)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun RestoreHiddenToolsButton(state: CanvasState) {
+    var showMenu by remember { mutableStateOf(false) }
+    if (state.palmConfig.hiddenTools.isEmpty()) return
+
+    Box {
+        IconButton(
+            onClick = { showMenu = true },
+            modifier = Modifier
+                .size(36.dp)
+                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f), CircleShape)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Unhide Tools",
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false }
+        ) {
+            Text(
+                text = "Hidden Tools (Tap to restore)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+            DrawingTool.entries.forEach { tool ->
+                if (state.isToolHidden(tool)) {
+                    val displayName = when (tool) {
+                        DrawingTool.PEN -> "Pen"
+                        DrawingTool.HIGHLIGHTER -> "Marker"
+                        DrawingTool.STROKE_ERASER -> "Stroke Eraser"
+                        DrawingTool.SEGMENT_ERASER -> "Precision Eraser"
+                        DrawingTool.SHAPE -> "Shapes"
+                        DrawingTool.TEXT -> "Text"
+                        DrawingTool.IMAGE -> "Picture"
+                        DrawingTool.AUDIO -> "Voice Note"
+                        DrawingTool.HAND -> "Pan"
+                        DrawingTool.LASSO -> "Lasso"
+                    }
+                    DropdownMenuItem(
+                        text = { Text("+ Add $displayName") },
+                        onClick = {
+                            state.unhideTool(tool)
+                            if (state.palmConfig.hiddenTools.isEmpty()) {
+                                showMenu = false
+                            }
+                        }
+                    )
+                }
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Restore All Tools") },
+                onClick = {
+                    state.resetHiddenTools()
+                    showMenu = false
+                }
+            )
+        }
+    }
+}
+
+@Composable
 private fun HandTool(state: CanvasState) {
-    ToolButton(
+    HideableToolButton(
+        tool = DrawingTool.HAND,
         icon = Icons.Default.PanTool,
         label = "Pan Tool",
         isSelected = state.currentTool == DrawingTool.HAND,
+        state = state,
         onClick = { state.currentTool = DrawingTool.HAND }
     )
 }
 
 @Composable
 private fun PenTool(state: CanvasState) {
-    ToolButton(
+    HideableToolButton(
+        tool = DrawingTool.PEN,
         icon = Icons.Default.ModeEdit,
         label = "Pen",
         isSelected = state.currentTool == DrawingTool.PEN,
+        state = state,
         onClick = { state.currentTool = DrawingTool.PEN }
     )
 }
 
 @Composable
 private fun HighlighterTool(state: CanvasState) {
-    ToolButton(
+    HideableToolButton(
+        tool = DrawingTool.HIGHLIGHTER,
         painter = painterResource(id = R.drawable.ic_highlighter_marker),
         label = "Highlighter Marker",
         isSelected = state.currentTool == DrawingTool.HIGHLIGHTER,
+        state = state,
         onClick = { state.currentTool = DrawingTool.HIGHLIGHTER }
     )
 }
@@ -378,12 +529,14 @@ private fun HighlighterTool(state: CanvasState) {
 private fun EraserTool(state: CanvasState) {
     val isSegmentEraser = state.currentTool == DrawingTool.SEGMENT_ERASER
     val isEraserActive = state.currentTool == DrawingTool.STROKE_ERASER || isSegmentEraser
-    ToolButton(
+    HideableToolButton(
+        tool = DrawingTool.STROKE_ERASER,
         painter = painterResource(
             id = if (isSegmentEraser) R.drawable.ic_eraser_precision else R.drawable.ic_eraser_stroke
         ),
         label = if (isSegmentEraser) "Precision Segment Eraser" else "Stroke Eraser",
         isSelected = isEraserActive,
+        state = state,
         onClick = {
             state.currentTool = if (state.currentTool == DrawingTool.STROKE_ERASER) {
                 DrawingTool.SEGMENT_ERASER
@@ -400,16 +553,50 @@ private fun ShapeTool(
     showShapeMenu: Boolean,
     onShowShapeMenuChange: (Boolean) -> Unit
 ) {
+    if (state.isToolHidden(DrawingTool.SHAPE)) return
+    var showContextMenu by remember { mutableStateOf(false) }
+
     Box {
-        ToolButton(
-            icon = Icons.Default.CropSquare,
-            label = "Shapes",
-            isSelected = state.currentTool == DrawingTool.SHAPE,
-            onClick = {
-                state.currentTool = DrawingTool.SHAPE
-                onShowShapeMenuChange(!showShapeMenu)
-            }
-        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    color = if (state.currentTool == DrawingTool.SHAPE) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            state.currentTool = DrawingTool.SHAPE
+                            onShowShapeMenuChange(!showShapeMenu)
+                        },
+                        onLongPress = { showContextMenu = true }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.CropSquare,
+                contentDescription = "Shapes",
+                tint = if (state.currentTool == DrawingTool.SHAPE) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Hide 'Shapes'") },
+                onClick = {
+                    showContextMenu = false
+                    state.hideTool(DrawingTool.SHAPE)
+                }
+            )
+        }
+
         DropdownMenu(
             expanded = showShapeMenu,
             onDismissRequest = { onShowShapeMenuChange(false) }
@@ -452,11 +639,37 @@ private fun ShapeTool(
 
 @Composable
 private fun TextTool(state: CanvasState) {
-    ToolButton(
+    HideableToolButton(
+        tool = DrawingTool.TEXT,
         icon = Icons.Default.TextFields,
         label = "Text Box",
         isSelected = state.currentTool == DrawingTool.TEXT,
+        state = state,
         onClick = { state.currentTool = DrawingTool.TEXT }
+    )
+}
+
+@Composable
+private fun ImageTool(state: CanvasState) {
+    HideableToolButton(
+        tool = DrawingTool.IMAGE,
+        icon = Icons.Default.Image,
+        label = "Picture",
+        isSelected = false,
+        state = state,
+        onClick = { state.showImageSourceDialog = true }
+    )
+}
+
+@Composable
+private fun AudioTool(state: CanvasState) {
+    HideableToolButton(
+        tool = DrawingTool.AUDIO,
+        icon = Icons.Default.Mic,
+        label = "Voice Note",
+        isSelected = false,
+        state = state,
+        onClick = { state.showVoiceRecorderDialog = true }
     )
 }
 
@@ -700,6 +913,8 @@ private fun HorizontalStatusRow(state: CanvasState) {
             DrawingTool.SEGMENT_ERASER -> "Eraser: Precision"
             DrawingTool.SHAPE -> "Shape"
             DrawingTool.TEXT -> "Text"
+            DrawingTool.IMAGE -> "Picture"
+            DrawingTool.AUDIO -> "Voice Note"
             DrawingTool.LASSO -> "Lasso"
             DrawingTool.HAND -> "Pan"
         }

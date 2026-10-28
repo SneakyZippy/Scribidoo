@@ -20,6 +20,8 @@ enum class DrawingTool {
     SEGMENT_ERASER,
     SHAPE,
     TEXT,
+    IMAGE,
+    AUDIO,
     LASSO,
     HAND
 }
@@ -95,6 +97,30 @@ data class TextBoxModel(
 )
 
 @Serializable
+data class ImageModel(
+    val id: String = UUID.randomUUID().toString(),
+    val localPath: String,
+    val x: Float,
+    val y: Float,
+    val width: Float = 400f,
+    val height: Float = 300f,
+    val keepAspectRatio: Boolean = true
+)
+
+@Serializable
+data class AudioNoteModel(
+    val id: String = UUID.randomUUID().toString(),
+    val localPath: String,
+    val x: Float,
+    val y: Float,
+    val durationMs: Long = 0L,
+    val trimStartMs: Long = 0L,
+    val trimEndMs: Long = 0L,
+    val label: String = "Voice Note",
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Serializable
 data class PageModel(
     val id: String = UUID.randomUUID().toString(),
     val index: Int = 0,
@@ -103,6 +129,8 @@ data class PageModel(
     val strokes: List<StrokeModel> = emptyList(),
     val shapes: List<ShapeModel> = emptyList(),
     val textBoxes: List<TextBoxModel> = emptyList(),
+    val images: List<ImageModel> = emptyList(),
+    val audioNotes: List<AudioNoteModel> = emptyList(),
     val backgroundPdfPage: Int? = null,
     val backgroundUri: String? = null
 )

@@ -1,5 +1,6 @@
 package com.scribidoo.app.canvas.ui
 
+import android.graphics.BitmapFactory
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import androidx.compose.foundation.Canvas
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -29,27 +31,36 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.toSize
 import com.scribidoo.app.canvas.ink.InkPathGenerator
 import com.scribidoo.app.canvas.input.ClassifiedTool
 import com.scribidoo.app.canvas.input.InputClassifier
 import com.scribidoo.app.canvas.input.InputVerdict
+import com.scribidoo.app.canvas.model.AudioNoteModel
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.model.DrawingTool
+import com.scribidoo.app.canvas.model.ImageModel
+import com.scribidoo.app.canvas.model.PageModel
 import com.scribidoo.app.canvas.model.ShapeModel
 import com.scribidoo.app.canvas.model.TextBoxModel
 import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.model.StrokeModel
 import com.scribidoo.app.canvas.state.CanvasState
+import com.scribidoo.app.canvas.state.SelectableType
+import com.scribidoo.app.canvas.state.SelectedItem
+import com.scribidoo.app.media.AudioPlaybackManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.math.hypot
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -75,15 +86,24 @@ fun TabletCanvasView(
     var viewportPointer0Id by remember { mutableStateOf<Int?>(null) }
     var viewportPointer1Id by remember { mutableStateOf<Int?>(null) }
 
-    // Text box transformation & selection states
-    var isMovingTextBox by remember { mutableStateOf(false) }
-    var isResizingTextBox by remember { mutableStateOf(false) }
+    val audioManager = remember { AudioPlaybackManager(coroutineScope) }
+    DisposableEffect(Unit) {
+        onDispose { audioManager.stop() }
+    }
+
+    // Transformation & interaction states
+    var isMovingItem by remember { mutableStateOf(false) }
+    var isLiftingAndDragging by remember { mutableStateOf(false) }
+    var isResizingItem by remember { mutableStateOf(false) }
+    var isMarginPanning by remember { mutableStateOf(false) }
+
     var longPressJob by remember { mutableStateOf<Job?>(null) }
+    var pendingTouchItem by remember { mutableStateOf<SelectedItem?>(null) }
     var initialTouchCanvas by remember { mutableStateOf(Offset.Zero) }
     var lastTouchCanvas by remember { mutableStateOf(Offset.Zero) }
+    var initialItemWidth by remember { mutableFloatStateOf(100f) }
+    var initialItemHeight by remember { mutableFloatStateOf(100f) }
     var initialFontSize by remember { mutableFloatStateOf(16f) }
-    var initialBoxWidth by remember { mutableFloatStateOf(100f) }
-    var pendingTouchTextBoxId by remember { mutableStateOf<String?>(null) }
 
     Box(
         modifier = modifier
@@ -98,13 +118,6 @@ fun TabletCanvasView(
                 val cH = state.viewportState.containerSize.height
                 fun isPalm(pointerIdx: Int): Boolean = inputClassifier.isPalmTouch(motionEvent, pointerIdx, cW, cH)
 
-                val pCount = motionEvent.pointerCount
-                val p0Major = if (pCount > 0) motionEvent.getTouchMajor(0) else 0f
-                val p0Size = if (pCount > 0) motionEvent.getSize(0) else 0f
-                val p1Major = if (pCount > 1) motionEvent.getTouchMajor(1) else 0f
-                val p1Size = if (pCount > 1) motionEvent.getSize(1) else 0f
-                android.util.Log.d("ScribidooTouch", "act=${motionEvent.actionMasked} cnt=$pCount p0(m=$p0Major,s=$p0Size) p1(m=$p1Major,s=$p1Size)")
-
                 when (motionEvent.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         isViewportGestureActive = false
@@ -113,81 +126,139 @@ fun TabletCanvasView(
                         activeDrawingPointerId = null
                         previousFocalPoint = null
                         previousSpan = 0f
+                        isMarginPanning = false
+                        isMovingItem = false
+                        isLiftingAndDragging = false
+                        isResizingItem = false
 
                         // Palm check on initial touch down:
                         if (isPalm(0)) {
-                            // First contact is palm -> ignore completely
                             return@pointerInteropFilter true
                         }
 
                         val screenPoint = Offset(motionEvent.x, motionEvent.y)
                         val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
 
-                        // 1. Check if tapping an ALREADY SELECTED text box (resize handle, pills, or inside to move)
-                        val selectedBox = state.currentPage.textBoxes.firstOrNull { it.id == state.selectedTextBoxId }
-                        if (selectedBox != null) {
-                            val bounds = getTextBoxBounds(selectedBox)
-                            val resizeCenter = Offset(bounds.right, bounds.bottom)
-                            val handleTouchDist = state.viewportState.screenToCanvasDist(36f)
-
-                            val dResize = canvasPoint - resizeCenter
-                            if (hypot(dResize.x, dResize.y) <= handleTouchDist) {
-                                isResizingTextBox = true
-                                isMovingTextBox = false
-                                lastTouchCanvas = canvasPoint
-                                initialTouchCanvas = canvasPoint
-                                initialFontSize = selectedBox.fontSizeSp
-                                initialBoxWidth = bounds.width.coerceAtLeast(30f)
-                                return@pointerInteropFilter true
-                            }
-
-                            val pillY = bounds.top - 28f
-                            val editRect = Rect(bounds.left, pillY - 4f, bounds.left + 50f, pillY + 24f)
-                            if (editRect.contains(canvasPoint)) {
-                                state.activeTextBoxForEdit = selectedBox
-                                state.selectedTextBoxId = null
-                                return@pointerInteropFilter true
-                            }
-
-                            val delRect = Rect(bounds.left + 54f, pillY - 4f, bounds.left + 106f, pillY + 24f)
-                            if (delRect.contains(canvasPoint)) {
-                                state.deleteTextBox(selectedBox.id)
-                                state.selectedTextBoxId = null
-                                return@pointerInteropFilter true
-                            }
-
-                            if (bounds.contains(canvasPoint)) {
-                                isMovingTextBox = true
-                                isResizingTextBox = false
-                                lastTouchCanvas = canvasPoint
-                                initialTouchCanvas = canvasPoint
-                                return@pointerInteropFilter true
-                            }
-
-                            // Tapped outside the selected box -> deselect
-                            state.selectedTextBoxId = null
+                        // 1. Check Paper Constrained Mode: Margin touches become canvas pan
+                        val isConstrained = state.palmConfig.constrainDrawingToPage && state.document.layoutMode == CanvasLayoutMode.PAGED
+                        val isOutsidePaper = isConstrained && (canvasPoint.x !in 0f..state.currentPage.width || canvasPoint.y !in 0f..state.currentPage.height)
+                        if (isOutsidePaper) {
+                            isMarginPanning = true
+                            previousFocalPoint = screenPoint
+                            activeDrawingPointerId = motionEvent.getPointerId(0)
+                            return@pointerInteropFilter true
                         }
 
-                        // 2. Check if pressing down on ANY text box to initiate LONG-PRESS move & resize
-                        val hitBox = state.currentPage.textBoxes.lastOrNull { tb ->
-                            getTextBoxBounds(tb).contains(canvasPoint)
+                        // 2. Check if tapping an ALREADY SELECTED item (resize handle, action buttons, or drag)
+                        val curSel = state.selectedItem
+                        if (curSel != null) {
+                            val bounds = getSelectedItemBounds(curSel, state.currentPage)
+                            if (bounds != null) {
+                                val resizeCenter = Offset(bounds.right, bounds.bottom)
+                                val handleTouchDist = state.viewportState.screenToCanvasDist(36f)
+                                val dResize = canvasPoint - resizeCenter
+
+                                // A. Bottom-right Resize Handle
+                                if (hypot(dResize.x, dResize.y) <= handleTouchDist) {
+                                    isResizingItem = true
+                                    lastTouchCanvas = canvasPoint
+                                    initialTouchCanvas = canvasPoint
+                                    initialItemWidth = bounds.width.coerceAtLeast(30f)
+                                    initialItemHeight = bounds.height.coerceAtLeast(30f)
+                                    if (curSel.type == SelectableType.TEXT_BOX) {
+                                        val tb = state.currentPage.textBoxes.firstOrNull { it.id == curSel.id }
+                                        initialFontSize = tb?.fontSizeSp ?: 16f
+                                    }
+                                    return@pointerInteropFilter true
+                                }
+
+                                val pillY = bounds.top - 28f
+                                val hasActionPill = curSel.type != SelectableType.SHAPE
+                                val delLeft = if (hasActionPill) bounds.left + 86f else bounds.left
+
+                                // B. Delete button
+                                val delRect = Rect(delLeft, pillY - 4f, delLeft + 54f, pillY + 24f)
+                                if (delRect.contains(canvasPoint)) {
+                                    state.deleteSelectedItem()
+                                    return@pointerInteropFilter true
+                                }
+
+                                // C. Action button (Edit Text / Aspect Ratio / Audio Options)
+                                if (hasActionPill) {
+                                    val actionRect = Rect(bounds.left, pillY - 4f, bounds.left + 80f, pillY + 24f)
+                                    if (actionRect.contains(canvasPoint)) {
+                                        when (curSel.type) {
+                                            SelectableType.TEXT_BOX -> {
+                                                state.activeTextBoxForEdit = state.currentPage.textBoxes.firstOrNull { it.id == curSel.id }
+                                                state.selectedItem = null
+                                            }
+                                            SelectableType.IMAGE -> {
+                                                state.toggleImageAspectRatio(curSel.id)
+                                            }
+                                            SelectableType.AUDIO_NOTE -> {
+                                                state.activeAudioForMenu = state.currentPage.audioNotes.firstOrNull { it.id == curSel.id }
+                                            }
+                                            SelectableType.SHAPE -> {}
+                                        }
+                                        return@pointerInteropFilter true
+                                    }
+                                }
+
+                                // D. Inside bounds -> Move
+                                if (bounds.contains(canvasPoint)) {
+                                    isMovingItem = true
+                                    lastTouchCanvas = canvasPoint
+                                    initialTouchCanvas = canvasPoint
+                                    return@pointerInteropFilter true
+                                }
+
+                                // Tapped outside the selected item -> deselect
+                                state.selectedItem = null
+                            }
                         }
-                        if (hitBox != null) {
-                            pendingTouchTextBoxId = hitBox.id
+
+                        // 3. Check if tapping an Audio Note PLAY button directly
+                        val hitAudioPlay = state.currentPage.audioNotes.lastOrNull { audio ->
+                            val playCenter = Offset(audio.x + 44f, audio.y)
+                            val touchDist = state.viewportState.screenToCanvasDist(26f)
+                            hypot(canvasPoint.x - playCenter.x, canvasPoint.y - playCenter.y) <= touchDist
+                        }
+                        if (hitAudioPlay != null) {
+                            audioManager.play(hitAudioPlay.localPath, hitAudioPlay.trimStartMs, hitAudioPlay.trimEndMs)
+                            return@pointerInteropFilter true
+                        }
+
+                        // 4. Hit Testing for LONG-PRESS (Instant Lift & Drag)
+                        val hitAudio = state.currentPage.audioNotes.lastOrNull { getAudioNoteBounds(it).contains(canvasPoint) }
+                        val hitText = if (hitAudio == null) state.currentPage.textBoxes.lastOrNull { getTextBoxBounds(it).contains(canvasPoint) } else null
+                        val hitImage = if (hitAudio == null && hitText == null) state.currentPage.images.lastOrNull { getImageBounds(it).contains(canvasPoint) } else null
+                        val hitShape = if (hitAudio == null && hitText == null && hitImage == null) state.currentPage.shapes.lastOrNull { getShapeBounds(it).contains(canvasPoint) } else null
+
+                        val hitItem = when {
+                            hitAudio != null -> SelectedItem(hitAudio.id, SelectableType.AUDIO_NOTE)
+                            hitText != null -> SelectedItem(hitText.id, SelectableType.TEXT_BOX)
+                            hitImage != null -> SelectedItem(hitImage.id, SelectableType.IMAGE)
+                            hitShape != null -> SelectedItem(hitShape.id, SelectableType.SHAPE)
+                            else -> null
+                        }
+
+                        if (hitItem != null) {
+                            pendingTouchItem = hitItem
                             initialTouchCanvas = canvasPoint
                             lastTouchCanvas = canvasPoint
                             longPressJob?.cancel()
                             longPressJob = coroutineScope.launch {
-                                delay(380)
-                                state.selectedTextBoxId = hitBox.id
-                                isMovingTextBox = true
+                                delay(350)
+                                state.selectedItem = hitItem
+                                isLiftingAndDragging = true
+                                isMovingItem = true
                                 if (state.activeStroke != null) {
                                     state.cancelStroke()
                                 }
                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                             }
                         } else {
-                            pendingTouchTextBoxId = null
+                            pendingTouchItem = null
                             longPressJob?.cancel()
                         }
 
@@ -213,7 +284,7 @@ fun TabletCanvasView(
                                     state.startShape(canvasPoint)
                                 }
                                 DrawingTool.TEXT -> {
-                                    if (hitBox == null) {
+                                    if (hitText == null) {
                                         state.activeTextBoxForEdit = null
                                         state.pendingTextInsertPoint = canvasPoint
                                     }
@@ -228,7 +299,6 @@ fun TabletCanvasView(
                         longPressJob = null
 
                         if (inputClassifier.isGenuineTwoFingerGesture(motionEvent)) {
-                            // 2 genuine fingertips on screen -> Enter 2-Finger Viewport Pan & Pinch-Zoom!
                             if (state.activeStroke != null) state.cancelStroke()
                             if (state.activeShape != null) state.activeShape = null
                             if (state.isErasing) state.finishErasing()
@@ -243,8 +313,6 @@ fun TabletCanvasView(
                             previousFocalPoint = (p0 + p1) / 2f
                             previousSpan = hypot(p1.x - p0.x, p1.y - p0.y).coerceAtLeast(1f)
                         } else {
-                            // Palm resting on screen alongside drawing finger/pen!
-                            // Do NOT enter viewport mode; do NOT interrupt drawing.
                             if (activeDrawingPointerId == null) {
                                 val bestIdx = inputClassifier.findBestDrawingPointerIndex(motionEvent)
                                 if (bestIdx != null) {
@@ -275,39 +343,58 @@ fun TabletCanvasView(
                     }
 
                     MotionEvent.ACTION_MOVE -> {
-                        // Cancel pending long press if user moved finger before long-press timer elapsed
-                        if (pendingTouchTextBoxId != null && !isMovingTextBox && !isResizingTextBox) {
-                            val screenPoint = Offset(motionEvent.x, motionEvent.y)
-                            val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+                        val screenPoint = Offset(motionEvent.x, motionEvent.y)
+                        val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+
+                        // Margin panning
+                        if (isMarginPanning) {
+                            if (previousFocalPoint != null) {
+                                val delta = screenPoint - previousFocalPoint!!
+                                state.viewportState.panBy(delta)
+                            }
+                            previousFocalPoint = screenPoint
+                            return@pointerInteropFilter true
+                        }
+
+                        // Cancel pending long press if finger moved before 350ms elapsed
+                        if (pendingTouchItem != null && !isLiftingAndDragging && !isMovingItem && !isResizingItem) {
                             val dTouch = canvasPoint - initialTouchCanvas
                             val dist = hypot(dTouch.x, dTouch.y)
                             if (dist > state.viewportState.screenToCanvasDist(12f)) {
                                 longPressJob?.cancel()
                                 longPressJob = null
-                                pendingTouchTextBoxId = null
+                                pendingTouchItem = null
                             }
                         }
 
-                        // Handle active text box moving
-                        if (isMovingTextBox && state.selectedTextBoxId != null) {
-                            val screenPoint = Offset(motionEvent.x, motionEvent.y)
-                            val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+                        // Handle moving item (Instant Lift & Drag or selected drag)
+                        if ((isMovingItem || isLiftingAndDragging) && state.selectedItem != null) {
                             val delta = canvasPoint - lastTouchCanvas
                             lastTouchCanvas = canvasPoint
-                            state.moveTextBox(state.selectedTextBoxId!!, delta)
+                            state.moveSelectedItem(delta)
                             return@pointerInteropFilter true
                         }
 
-                        // Handle active text box resizing
-                        if (isResizingTextBox && state.selectedTextBoxId != null) {
-                            val screenPoint = Offset(motionEvent.x, motionEvent.y)
-                            val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
-                            val selected = state.currentPage.textBoxes.firstOrNull { it.id == state.selectedTextBoxId }
-                            if (selected != null) {
-                                val bounds = getTextBoxBounds(selected)
-                                val currentWidth = (canvasPoint.x - bounds.left).coerceAtLeast(30f)
-                                val scale = currentWidth / initialBoxWidth
-                                state.resizeTextBox(selected.id, initialFontSize * scale)
+                        // Handle resizing selected item
+                        if (isResizingItem && state.selectedItem != null) {
+                            val item = state.selectedItem!!
+                            val deltaX = canvasPoint.x - initialTouchCanvas.x
+                            val deltaY = canvasPoint.y - initialTouchCanvas.y
+
+                            when (item.type) {
+                                SelectableType.IMAGE -> {
+                                    val newW = (initialItemWidth + deltaX).coerceAtLeast(50f)
+                                    val newH = (initialItemHeight + deltaY).coerceAtLeast(40f)
+                                    state.resizeImage(item.id, newW, newH)
+                                }
+                                SelectableType.TEXT_BOX -> {
+                                    val scale = ((initialItemWidth + deltaX).coerceAtLeast(30f)) / initialItemWidth
+                                    state.resizeTextBox(item.id, initialFontSize * scale)
+                                }
+                                SelectableType.SHAPE -> {
+                                    state.resizeShape(item.id, canvasPoint.x, canvasPoint.y)
+                                }
+                                SelectableType.AUDIO_NOTE -> {}
                             }
                             return@pointerInteropFilter true
                         }
@@ -338,9 +425,6 @@ fun TabletCanvasView(
                             val fingerIdx = motionEvent.findPointerIndex(activeDrawingPointerId!!)
                             if (fingerIdx >= 0) {
                                 if (!isPalm(fingerIdx)) {
-                                    val screenPoint = Offset(motionEvent.getX(fingerIdx), motionEvent.getY(fingerIdx))
-                                    val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
-
                                     if (state.currentTool == DrawingTool.HAND) {
                                         if (previousFocalPoint != null) {
                                             val delta = screenPoint - previousFocalPoint!!
@@ -399,22 +483,34 @@ fun TabletCanvasView(
                         longPressJob?.cancel()
                         longPressJob = null
 
-                        if (isMovingTextBox || isResizingTextBox) {
-                            isMovingTextBox = false
-                            isResizingTextBox = false
+                        if (isMarginPanning) {
+                            isMarginPanning = false
+                            return@pointerInteropFilter true
+                        }
+
+                        if (isLiftingAndDragging || isMovingItem || isResizingItem) {
+                            isLiftingAndDragging = false
+                            isMovingItem = false
+                            isResizingItem = false
                             state.commitTransform()
                             return@pointerInteropFilter true
                         }
 
-                        // If released quickly on a text box without long-press:
-                        if (pendingTouchTextBoxId != null) {
-                            val tappedId = pendingTouchTextBoxId
-                            pendingTouchTextBoxId = null
-                            if (state.currentTool == DrawingTool.TEXT) {
-                                val tappedBox = state.currentPage.textBoxes.firstOrNull { it.id == tappedId }
-                                if (tappedBox != null) {
-                                    state.activeTextBoxForEdit = tappedBox
+                        // Quick tap on an item without holding for long press
+                        if (pendingTouchItem != null) {
+                            val tappedItem = pendingTouchItem!!
+                            pendingTouchItem = null
+                            state.selectedItem = tappedItem
+                            when (tappedItem.type) {
+                                SelectableType.AUDIO_NOTE -> {
+                                    state.activeAudioForMenu = state.currentPage.audioNotes.firstOrNull { it.id == tappedItem.id }
                                 }
+                                SelectableType.TEXT_BOX -> {
+                                    if (state.currentTool == DrawingTool.TEXT) {
+                                        state.activeTextBoxForEdit = state.currentPage.textBoxes.firstOrNull { it.id == tappedItem.id }
+                                    }
+                                }
+                                else -> {}
                             }
                         }
 
@@ -440,9 +536,11 @@ fun TabletCanvasView(
                     MotionEvent.ACTION_CANCEL -> {
                         longPressJob?.cancel()
                         longPressJob = null
-                        isMovingTextBox = false
-                        isResizingTextBox = false
-                        pendingTouchTextBoxId = null
+                        isLiftingAndDragging = false
+                        isMovingItem = false
+                        isResizingItem = false
+                        isMarginPanning = false
+                        pendingTouchItem = null
                         isViewportGestureActive = false
                         previousFocalPoint = null
                         previousSpan = 0f
@@ -509,34 +607,61 @@ fun TabletCanvasView(
                     }
                 }
 
-                // 2. Vector Stroke Layer (Highlighters first with BlendMode.Multiply, then Pens)
+                // 2. Paper-Constrained Layer (Images, Strokes, Shapes)
                 val allStrokes = if (state.activeStroke != null) {
                     curPage.strokes + state.activeStroke!!
                 } else {
                     curPage.strokes
                 }
-
-                // Group strokes to draw highlighters with Multiply blend
-                for (stroke in allStrokes) {
-                    drawVectorStroke(stroke)
-                }
-
-                // 3. Shape Layer
                 val allShapes = if (state.activeShape != null) {
                     curPage.shapes + state.activeShape!!
                 } else {
                     curPage.shapes
                 }
-                for (shape in allShapes) {
-                    drawVectorShape(shape)
+
+                val shouldClip = state.palmConfig.constrainDrawingToPage && layoutMode == CanvasLayoutMode.PAGED
+                val drawCoreContent = {
+                    // 2a. Images
+                    drawImages(curPage.images, state.imageBitmaps)
+
+                    // 2b. Strokes (Highlighters first with Multiply blend, then Pens)
+                    for (stroke in allStrokes) {
+                        drawVectorStroke(stroke)
+                    }
+
+                    // 2c. Shapes
+                    for (shape in allShapes) {
+                        drawVectorShape(shape)
+                    }
                 }
 
-                // 4. Text Boxes
+                if (shouldClip) {
+                    clipRect(0f, 0f, curPage.width, curPage.height) {
+                        drawCoreContent()
+                    }
+                } else {
+                    drawCoreContent()
+                }
+
+                // 3. Text Boxes
                 drawTextBoxes(
                     textBoxes = curPage.textBoxes,
                     isTextToolActive = state.currentTool == DrawingTool.TEXT,
-                    selectedTextBoxId = state.activeTextBoxForEdit?.id
+                    selectedTextBoxId = if (state.selectedItem?.type == SelectableType.TEXT_BOX) state.selectedItem?.id else null
                 )
+
+                // 4. Audio Notes
+                drawAudioNotes(
+                    audioNotes = curPage.audioNotes,
+                    playingAudioPath = audioManager.currentlyPlayingPath,
+                    isPlaying = audioManager.isPlaying
+                )
+
+                // 5. Selected Item Transform & Action Overlay
+                val activeSel = state.selectedItem
+                if (activeSel != null) {
+                    drawSelectedItemOverlay(activeSel, curPage)
+                }
             }
         }
     }
@@ -818,4 +943,228 @@ private fun DrawScope.drawTextBoxes(
             textPaint
         )
     }
+}
+
+fun getImageBounds(img: ImageModel): Rect {
+    return Rect(img.x, img.y, img.x + img.width, img.y + img.height)
+}
+
+fun getShapeBounds(shape: ShapeModel): Rect {
+    val pad = maxOf(shape.strokeWidth / 2f, 16f)
+    val left = minOf(shape.startX, shape.endX) - pad
+    val top = minOf(shape.startY, shape.endY) - pad
+    val right = maxOf(shape.startX, shape.endX) + pad
+    val bottom = maxOf(shape.startY, shape.endY) + pad
+    return Rect(left, top, right, bottom)
+}
+
+fun getAudioNoteBounds(audio: AudioNoteModel): Rect {
+    return Rect(audio.x - 64f, audio.y - 18f, audio.x + 64f, audio.y + 18f)
+}
+
+fun getSelectedItemBounds(item: SelectedItem, page: PageModel): Rect? {
+    return when (item.type) {
+        SelectableType.TEXT_BOX -> page.textBoxes.firstOrNull { it.id == item.id }?.let { getTextBoxBounds(it) }
+        SelectableType.IMAGE -> page.images.firstOrNull { it.id == item.id }?.let { getImageBounds(it) }
+        SelectableType.SHAPE -> page.shapes.firstOrNull { it.id == item.id }?.let { getShapeBounds(it) }
+        SelectableType.AUDIO_NOTE -> page.audioNotes.firstOrNull { it.id == item.id }?.let { getAudioNoteBounds(it) }
+    }
+}
+
+private fun DrawScope.drawImages(
+    images: List<ImageModel>,
+    bitmapCache: MutableMap<String, androidx.compose.ui.graphics.ImageBitmap>
+) {
+    for (img in images) {
+        var bmp = bitmapCache[img.id]
+        if (bmp == null) {
+            val file = File(img.localPath)
+            if (file.exists()) {
+                val decoded = BitmapFactory.decodeFile(img.localPath)
+                if (decoded != null) {
+                    bmp = decoded.asImageBitmap()
+                    bitmapCache[img.id] = bmp
+                }
+            }
+        }
+        if (bmp != null) {
+            drawImage(
+                image = bmp,
+                dstOffset = IntOffset(img.x.toInt(), img.y.toInt()),
+                dstSize = IntSize(img.width.toInt(), img.height.toInt())
+            )
+        }
+    }
+}
+
+private fun DrawScope.drawAudioNotes(
+    audioNotes: List<AudioNoteModel>,
+    playingAudioPath: String?,
+    isPlaying: Boolean
+) {
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        textSize = 24f
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        color = android.graphics.Color.WHITE
+    }
+
+    for (audio in audioNotes) {
+        val bounds = getAudioNoteBounds(audio)
+        val isCurrentPlaying = playingAudioPath == audio.localPath && isPlaying
+        val pillBgColor = if (isCurrentPlaying) Color(0xFF2563EB) else Color(0xFF1E293B)
+
+        // Pill background with subtle shadow
+        drawRoundRect(
+            color = Color(0x33000000),
+            topLeft = Offset(bounds.left + 2f, bounds.top + 3f),
+            size = Size(bounds.width, bounds.height),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(18f, 18f)
+        )
+        drawRoundRect(
+            color = pillBgColor,
+            topLeft = Offset(bounds.left, bounds.top),
+            size = Size(bounds.width, bounds.height),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(18f, 18f)
+        )
+
+        // Mic indicator dot (red dot if recording/audio, blue if currently playing)
+        drawCircle(
+            color = if (isCurrentPlaying) Color(0xFF60A5FA) else Color(0xFFEF4444),
+            radius = 5f,
+            center = Offset(bounds.left + 16f, audio.y)
+        )
+
+        // Duration / timer text
+        val durSec = (audio.durationMs / 1000L).coerceAtLeast(1L)
+        val timeStr = String.format("%02d:%02d", durSec / 60, durSec % 60)
+        drawContext.canvas.nativeCanvas.drawText(
+            timeStr,
+            bounds.left + 26f,
+            audio.y + 8f,
+            paint
+        )
+
+        // Play/Pause circular button area on right side of pill
+        val playCenter = Offset(bounds.right - 18f, audio.y)
+        drawCircle(
+            color = Color.White.copy(alpha = 0.25f),
+            radius = 12f,
+            center = playCenter
+        )
+
+        if (isCurrentPlaying) {
+            // Pause bars
+            drawLine(
+                color = Color.White,
+                start = Offset(playCenter.x - 3f, playCenter.y - 5f),
+                end = Offset(playCenter.x - 3f, playCenter.y + 5f),
+                strokeWidth = 2.5f
+            )
+            drawLine(
+                color = Color.White,
+                start = Offset(playCenter.x + 3f, playCenter.y - 5f),
+                end = Offset(playCenter.x + 3f, playCenter.y + 5f),
+                strokeWidth = 2.5f
+            )
+        } else {
+            // Play triangle
+            val playPath = Path().apply {
+                moveTo(playCenter.x - 3.5f, playCenter.y - 5.5f)
+                lineTo(playCenter.x + 5f, playCenter.y)
+                lineTo(playCenter.x - 3.5f, playCenter.y + 5.5f)
+                close()
+            }
+            drawPath(playPath, color = Color.White)
+        }
+    }
+}
+
+private fun DrawScope.drawSelectedItemOverlay(
+    item: SelectedItem,
+    page: PageModel
+) {
+    val bounds = getSelectedItemBounds(item, page) ?: return
+
+    // Soft border around the selected item
+    drawRoundRect(
+        color = Color(0x222563EB),
+        topLeft = Offset(bounds.left, bounds.top),
+        size = Size(bounds.width, bounds.height),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
+    )
+    drawRoundRect(
+        color = Color(0xFF2563EB),
+        topLeft = Offset(bounds.left, bounds.top),
+        size = Size(bounds.width, bounds.height),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f),
+        style = Stroke(width = 2f)
+    )
+
+    // Corner dots (top-left, top-right, bottom-left)
+    val dotRadius = 4.5f
+    listOf(
+        Offset(bounds.left, bounds.top),
+        Offset(bounds.right, bounds.top),
+        Offset(bounds.left, bounds.bottom)
+    ).forEach { pt ->
+        drawCircle(color = Color.White, radius = dotRadius, center = pt)
+        drawCircle(color = Color(0xFF2563EB), radius = dotRadius, center = pt, style = Stroke(width = 1.5f))
+    }
+
+    // Bottom-right RESIZE HANDLE
+    val resizeCenter = Offset(bounds.right, bounds.bottom)
+    val resizeRadius = 10f
+    drawCircle(color = Color(0xFF2563EB), radius = resizeRadius, center = resizeCenter)
+    drawCircle(color = Color.White, radius = resizeRadius, center = resizeCenter, style = Stroke(width = 2f))
+    drawLine(
+        color = Color.White,
+        start = Offset(resizeCenter.x - 4f, resizeCenter.y - 4f),
+        end = Offset(resizeCenter.x + 4f, resizeCenter.y + 4f),
+        strokeWidth = 2f,
+        cap = StrokeCap.Round
+    )
+
+    // Top Action buttons: [ Action ]  [ Delete ]
+    val pillY = bounds.top - 28f
+    val actionText = when (item.type) {
+        SelectableType.TEXT_BOX -> "Edit"
+        SelectableType.IMAGE -> {
+            val img = page.images.firstOrNull { it.id == item.id }
+            if (img?.keepAspectRatio == true) "Aspect: Lock" else "Aspect: Free"
+        }
+        SelectableType.AUDIO_NOTE -> "Options"
+        SelectableType.SHAPE -> null
+    }
+
+    if (actionText != null) {
+        drawRoundRect(
+            color = Color(0xFF1E293B),
+            topLeft = Offset(bounds.left, pillY),
+            size = Size(80f, 22f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+        )
+        val textPaint = android.graphics.Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.WHITE
+            textSize = 10f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+        drawContext.canvas.nativeCanvas.drawText(actionText, bounds.left + 8f, pillY + 15f, textPaint)
+    }
+
+    val delLeft = if (actionText != null) bounds.left + 86f else bounds.left
+    drawRoundRect(
+        color = Color(0xFFDC2626),
+        topLeft = Offset(delLeft, pillY),
+        size = Size(52f, 22f),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+    )
+    val delPaint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        color = android.graphics.Color.WHITE
+        textSize = 11f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+    drawContext.canvas.nativeCanvas.drawText("Delete", delLeft + 10f, pillY + 15f, delPaint)
 }
