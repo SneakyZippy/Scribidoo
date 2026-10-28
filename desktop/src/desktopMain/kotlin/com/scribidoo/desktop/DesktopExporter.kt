@@ -70,7 +70,7 @@ object DesktopExporter {
         // 3. Vector Strokes
         for (stroke in page.strokes) {
             if (stroke.points.size < 2) continue
-            val composePath = InkPathGenerator.generateSmoothPath(stroke.points)
+            val composePath = InkPathGenerator.createSmoothPath(stroke.points)
             val skiaPath = composePath.asSkiaPath()
 
             val strokePaint = Paint().apply {
@@ -132,7 +132,7 @@ object DesktopExporter {
         }
 
         // 5. Text Boxes
-        val font = Font(Typeface.makeDefault(), 18f)
+        val font = Font().apply { size = 18f }
         for (tb in page.textBoxes) {
             val textPaint = Paint().apply {
                 color = tb.colorArgb

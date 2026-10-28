@@ -61,7 +61,7 @@ class ViewportState(
     /**
      * Zooms around a screen focal point so the content under the focal point stays in place.
      */
-    fun zoomBy(zoomFactor: Float, focalPoint: Offset) {
+    fun zoomBy(zoomFactor: Float, focalPoint: Offset = Offset(containerSize.width / 2f, containerSize.height / 2f)) {
         val oldScale = scale
         val newScale = (oldScale * zoomFactor).coerceIn(minScale, maxScale)
         if (oldScale == newScale) return
