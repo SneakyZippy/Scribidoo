@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextStyle
@@ -73,6 +75,11 @@ fun DesktopCanvasView(
     var previousFocalPoint by remember { mutableStateOf<Offset?>(null) }
     var previousSpan by remember { mutableFloatStateOf(0f) }
 
+    // Navigation & Pan drag tracking (mouse right/middle-click drag or 1-finger drag in Stylus-only mode)
+    var isPanDragging by remember { mutableStateOf(false) }
+    var lastPanScreenPoint by remember { mutableStateOf(Offset.Zero) }
+    var isStylusErasing by remember { mutableStateOf(false) }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -108,15 +115,44 @@ fun DesktopCanvasView(
                                     previousSpan = hypot(p1.x - p0.x, p1.y - p0.y).coerceAtLeast(1f)
                                     if (state.activeStroke != null) state.cancelStroke()
                                     if (state.activeShape != null) state.activeShape = null
+                                    isPanDragging = false
+                                    isStylusErasing = false
                                 } else {
                                     val change = changes.first()
                                     val screenPoint = change.position
                                     val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+
+                                    // 1. Navigation / Pan triggers:
+                                    // - Right-click or middle-click drag with mouse
+                                    val isMousePan = change.type == PointerType.Mouse && (event.buttons.isSecondaryPressed || event.buttons.isTertiaryPressed)
+                                    // - Touch pan when finger drawing is disabled (Stylus Only / Palm rejection mode)
+                                    val isTouchPan = change.type == PointerType.Touch && !state.palmConfig.isFingerDrawingEnabled
+
+                                    if (isMousePan || isTouchPan) {
+                                        isPanDragging = true
+                                        lastPanScreenPoint = screenPoint
+                                        if (state.activeStroke != null) state.cancelStroke()
+                                        if (state.activeShape != null) state.activeShape = null
+                                        change.consume()
+                                        continue
+                                    }
+                                    isPanDragging = false
+
+                                    // 2. Active stylus eraser tail support
+                                    if (change.type == PointerType.Eraser) {
+                                        isStylusErasing = true
+                                        val eraserRadius = state.viewportState.screenToCanvasDist(36f)
+                                        state.eraseAt(canvasPoint, eraserRadius)
+                                        change.consume()
+                                        continue
+                                    }
+                                    isStylusErasing = false
+
                                     val isStylus = change.type == PointerType.Stylus
                                     val rawPressure = change.pressure
                                     val pressure = if (isStylus && rawPressure > 0f) rawPressure.coerceIn(0.1f, 1.0f) else 0.5f
 
-                                    // 1. Check if tapping an ALREADY SELECTED text box (resize handle, pills, or inside)
+                                    // 3. Check if tapping an ALREADY SELECTED text box (resize handle, pills, or inside)
                                     val selectedBox = state.currentPage.textBoxes.firstOrNull { it.id == state.selectedTextBoxId }
                                     if (selectedBox != null) {
                                         val bounds = getDesktopTextBoxBounds(selectedBox)
@@ -164,7 +200,7 @@ fun DesktopCanvasView(
                                         state.selectedTextBoxId = null
                                     }
 
-                                    // 2. Check for Long-press on any text box
+                                    // 4. Check for Long-press on any text box
                                     val hitBox = state.currentPage.textBoxes.lastOrNull { tb ->
                                         getDesktopTextBoxBounds(tb).contains(canvasPoint)
                                     }
@@ -230,10 +266,26 @@ fun DesktopCanvasView(
                                     previousFocalPoint = currentFocal
                                     previousSpan = currentSpan
                                     changes.forEach { it.consume() }
+                                } else if (isPanDragging && changes.isNotEmpty()) {
+                                    // 1-Finger touch pan (in Stylus Only mode) or mouse right/middle drag pan
+                                    val change = changes.first()
+                                    val screenPoint = change.position
+                                    val delta = screenPoint - lastPanScreenPoint
+                                    lastPanScreenPoint = screenPoint
+                                    state.viewportState.panBy(delta)
+                                    change.consume()
                                 } else if (changes.isNotEmpty()) {
                                     val change = changes.first()
                                     val screenPoint = change.position
                                     val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+
+                                    if (isStylusErasing || change.type == PointerType.Eraser) {
+                                        val eraserRadius = state.viewportState.screenToCanvasDist(36f)
+                                        state.eraseAt(canvasPoint, eraserRadius)
+                                        change.consume()
+                                        continue
+                                    }
+
                                     val isStylus = change.type == PointerType.Stylus
                                     val rawPressure = change.pressure
                                     val pressure = if (isStylus && rawPressure > 0f) rawPressure.coerceIn(0.1f, 1.0f) else 0.5f
@@ -294,6 +346,18 @@ fun DesktopCanvasView(
                                 longPressJob = null
                                 previousFocalPoint = null
                                 previousSpan = 0f
+
+                                if (isPanDragging) {
+                                    isPanDragging = false
+                                    changes.forEach { it.consume() }
+                                    continue
+                                }
+
+                                if (isStylusErasing) {
+                                    isStylusErasing = false
+                                    changes.forEach { it.consume() }
+                                    continue
+                                }
 
                                 if (isMovingTextBox || isResizingTextBox) {
                                     isMovingTextBox = false

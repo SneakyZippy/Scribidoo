@@ -37,12 +37,29 @@ To launch the desktop app directly:
 ./gradlew :desktop:run
 ```
 
-To create a standalone Windows installer or portable build:
+#### Option A: Windows Installer (.exe / .msi)
+Creates an installer that prompts for install location, installs per-user, and automatically adds **Desktop & Start Menu shortcuts**:
 ```bash
+# Generate .exe installer:
+./gradlew :desktop:packageExe
+# Output: desktop/build/compose/binaries/main/exe/Scribidoo-1.0.0.exe
+
+# Or generate .msi installer:
 ./gradlew :desktop:packageMsi
-# or portable folder:
-./gradlew :desktop:createDistributable
+# Output: desktop/build/compose/binaries/main/msi/Scribidoo-1.0.0.msi
 ```
+
+#### Option B: Standalone Portable Application (No installation needed)
+If you want to copy Scribidoo to a USB drive or laptop and run it immediately without installing any developer tools, JDK, or running an installer wizard:
+
+- **1-Click Build on Dev PC**: Double-click [`build-portable.bat`](file:///d:/Projects/Scribidoo/build-portable.bat) (or run `./gradlew :desktop:packagePortableZip`).
+  - Output files are automatically copied to root `dist/`:
+    - `dist/Scribidoo-Portable.zip` (ready to copy via USB or cloud drive)
+    - `dist/Scribidoo-Portable/Scribidoo.exe` (unpacked directory)
+  - Copy `Scribidoo-Portable.zip` to your laptop, extract it anywhere, and double-click `Scribidoo.exe`. It runs standalone without needing Java or any other dependencies installed!
+
+- **Download directly via GitHub Actions**:
+  - Push to GitHub, go to the **Actions** tab, select the latest build, and download `Scribidoo-Portable-Windows` directly on your laptop via your browser.
 
 ### Running on Android
 Open the project in Android Studio, or build and install via CLI:
@@ -52,12 +69,14 @@ Open the project in Android Studio, or build and install via CLI:
 
 ## Gestures & Controls
 
-| Action | Stylus / Touch | Mouse (Desktop) |
-|---|---|---|
-| **Draw / Erase** | Active Pen tip (pressure-sensitive) | Left click + drag |
-| **Pan Canvas** | 2-finger drag | Right click + drag or Middle click |
-| **Zoom** | 2-finger pinch | Mouse scroll wheel (or Ctrl + Scroll) |
-| **Move / Resize Text** | Long-press text box & drag | Drag text box handle |
+| Action | Stylus / Touch (Stylus Only Mode) | Stylus / Touch (Touch Draw Mode) | Mouse (Desktop) |
+|---|---|---|---|
+| **Draw** | Active Pen tip (pressure-sensitive) | Pen tip or 1-finger drag | Left click + drag |
+| **Erase** | Pen eraser tail or Eraser tool | Eraser tool | Left click with Eraser tool |
+| **Pan Canvas** | 1-finger drag or 2-finger drag | 2-finger drag | Right click + drag or Middle click |
+| **Zoom** | 2-finger pinch | 2-finger pinch | Mouse scroll wheel (or Ctrl + Scroll) |
+| **Move / Resize Text** | Long-press text box & drag | Long-press text box & drag | Drag text box handle |
+| **Palm Rejection** | Complete palm immunity | Adjustable sensitivity | N/A |
 
 ## License
 MIT
