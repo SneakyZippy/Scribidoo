@@ -63,6 +63,9 @@ class CanvasState(
 
     private var preEraseDocument: DocumentModel? = null
 
+    val isErasing: Boolean
+        get() = preEraseDocument != null
+
     fun startErasing() {
         if (preEraseDocument == null) {
             preEraseDocument = document

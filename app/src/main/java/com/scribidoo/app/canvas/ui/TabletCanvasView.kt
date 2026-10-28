@@ -70,6 +70,11 @@ fun TabletCanvasView(
     var previousSpan by remember { mutableFloatStateOf(0f) }
     var isViewportGestureActive by remember { mutableStateOf(false) }
 
+    // Multi-touch & palm rejection pointer trackers
+    var activeDrawingPointerId by remember { mutableStateOf<Int?>(null) }
+    var viewportPointer0Id by remember { mutableStateOf<Int?>(null) }
+    var viewportPointer1Id by remember { mutableStateOf<Int?>(null) }
+
     // Text box transformation & selection states
     var isMovingTextBox by remember { mutableStateOf(false) }
     var isResizingTextBox by remember { mutableStateOf(false) }
@@ -89,11 +94,32 @@ fun TabletCanvasView(
                 state.viewportState.containerSize = size.toSize()
             }
             .pointerInteropFilter { motionEvent ->
-                val pointerCount = motionEvent.pointerCount
+                val cW = state.viewportState.containerSize.width
+                val cH = state.viewportState.containerSize.height
+                fun isPalm(pointerIdx: Int): Boolean = inputClassifier.isPalmTouch(motionEvent, pointerIdx, cW, cH)
+
+                val pCount = motionEvent.pointerCount
+                val p0Major = if (pCount > 0) motionEvent.getTouchMajor(0) else 0f
+                val p0Size = if (pCount > 0) motionEvent.getSize(0) else 0f
+                val p1Major = if (pCount > 1) motionEvent.getTouchMajor(1) else 0f
+                val p1Size = if (pCount > 1) motionEvent.getSize(1) else 0f
+                android.util.Log.d("ScribidooTouch", "act=${motionEvent.actionMasked} cnt=$pCount p0(m=$p0Major,s=$p0Size) p1(m=$p1Major,s=$p1Size)")
 
                 when (motionEvent.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         isViewportGestureActive = false
+                        viewportPointer0Id = null
+                        viewportPointer1Id = null
+                        activeDrawingPointerId = null
+                        previousFocalPoint = null
+                        previousSpan = 0f
+
+                        // Palm check on initial touch down:
+                        if (isPalm(0)) {
+                            // First contact is palm -> ignore completely
+                            return@pointerInteropFilter true
+                        }
+
                         val screenPoint = Offset(motionEvent.x, motionEvent.y)
                         val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
 
@@ -153,7 +179,6 @@ fun TabletCanvasView(
                             longPressJob?.cancel()
                             longPressJob = coroutineScope.launch {
                                 delay(380)
-                                // Long press triggered!
                                 state.selectedTextBoxId = hitBox.id
                                 isMovingTextBox = true
                                 if (state.activeStroke != null) {
@@ -166,51 +191,34 @@ fun TabletCanvasView(
                             longPressJob?.cancel()
                         }
 
-                        val verdict = inputClassifier.evaluateTouch(
-                            event = motionEvent,
-                            pointerIndex = 0,
-                            containerWidth = state.viewportState.containerSize.width,
-                            containerHeight = state.viewportState.containerSize.height,
-                            activePointersCount = 1
-                        )
+                        // Register pointer 0 as active drawing pointer
+                        activeDrawingPointerId = motionEvent.getPointerId(0)
 
-                        when (verdict) {
-                            InputVerdict.ACCEPT_FOR_DRAWING -> {
-                                val pressure = motionEvent.pressure.coerceIn(0.1f, 1.0f)
-
-                                when (state.currentTool) {
-                                    DrawingTool.PEN,
-                                    DrawingTool.HIGHLIGHTER -> {
-                                        state.startStroke(canvasPoint, pressure)
-                                    }
-                                    DrawingTool.HAND -> {
-                                        isViewportGestureActive = true
-                                        previousFocalPoint = Offset(motionEvent.x, motionEvent.y)
-                                    }
-                                    DrawingTool.STROKE_ERASER,
-                                    DrawingTool.SEGMENT_ERASER -> {
-                                        state.startErasing()
-                                        val eraserRadius = state.viewportState.screenToCanvasDist(32f)
-                                        state.eraseAt(canvasPoint, eraserRadius)
-                                    }
-                                    DrawingTool.SHAPE -> {
-                                        state.startShape(canvasPoint)
-                                    }
-                                    DrawingTool.TEXT -> {
-                                        if (hitBox == null) {
-                                            state.activeTextBoxForEdit = null
-                                            state.pendingTextInsertPoint = canvasPoint
-                                        }
-                                    }
-                                    else -> {}
+                        if (state.currentTool == DrawingTool.HAND) {
+                            previousFocalPoint = screenPoint
+                        } else {
+                            val pressure = motionEvent.pressure.coerceIn(0.1f, 1.0f)
+                            when (state.currentTool) {
+                                DrawingTool.PEN,
+                                DrawingTool.HIGHLIGHTER -> {
+                                    state.startStroke(canvasPoint, pressure)
                                 }
-                            }
-                            InputVerdict.ACCEPT_FOR_VIEWPORT -> {
-                                isViewportGestureActive = true
-                                previousFocalPoint = Offset(motionEvent.x, motionEvent.y)
-                            }
-                            InputVerdict.DISCARD_PALM -> {
-                                // Discard accidental palm touch
+                                DrawingTool.STROKE_ERASER,
+                                DrawingTool.SEGMENT_ERASER -> {
+                                    state.startErasing()
+                                    val eraserRadius = state.viewportState.screenToCanvasDist(32f)
+                                    state.eraseAt(canvasPoint, eraserRadius)
+                                }
+                                DrawingTool.SHAPE -> {
+                                    state.startShape(canvasPoint)
+                                }
+                                DrawingTool.TEXT -> {
+                                    if (hitBox == null) {
+                                        state.activeTextBoxForEdit = null
+                                        state.pendingTextInsertPoint = canvasPoint
+                                    }
+                                }
+                                else -> {}
                             }
                         }
                     }
@@ -218,30 +226,59 @@ fun TabletCanvasView(
                     MotionEvent.ACTION_POINTER_DOWN -> {
                         longPressJob?.cancel()
                         longPressJob = null
-                        isMovingTextBox = false
-                        isResizingTextBox = false
 
-                        // Multi-touch entered (e.g. 2nd finger placed down)
-                        if (state.activeStroke != null) {
-                            state.cancelStroke()
-                        }
-                        if (state.activeShape != null) {
-                            state.activeShape = null
-                        }
+                        if (inputClassifier.isGenuineTwoFingerGesture(motionEvent)) {
+                            // 2 genuine fingertips on screen -> Enter 2-Finger Viewport Pan & Pinch-Zoom!
+                            if (state.activeStroke != null) state.cancelStroke()
+                            if (state.activeShape != null) state.activeShape = null
+                            if (state.isErasing) state.finishErasing()
+                            activeDrawingPointerId = null
 
-                        isViewportGestureActive = true
-                        val p0 = Offset(motionEvent.getX(0), motionEvent.getY(0))
-                        val p1 = Offset(motionEvent.getX(1), motionEvent.getY(1))
-                        previousFocalPoint = (p0 + p1) / 2f
-                        previousSpan = hypot(p1.x - p0.x, p1.y - p0.y).coerceAtLeast(1f)
+                            isViewportGestureActive = true
+                            viewportPointer0Id = motionEvent.getPointerId(0)
+                            viewportPointer1Id = motionEvent.getPointerId(1)
+
+                            val p0 = Offset(motionEvent.getX(0), motionEvent.getY(0))
+                            val p1 = Offset(motionEvent.getX(1), motionEvent.getY(1))
+                            previousFocalPoint = (p0 + p1) / 2f
+                            previousSpan = hypot(p1.x - p0.x, p1.y - p0.y).coerceAtLeast(1f)
+                        } else {
+                            // Palm resting on screen alongside drawing finger/pen!
+                            // Do NOT enter viewport mode; do NOT interrupt drawing.
+                            if (activeDrawingPointerId == null) {
+                                val bestIdx = inputClassifier.findBestDrawingPointerIndex(motionEvent)
+                                if (bestIdx != null) {
+                                    activeDrawingPointerId = motionEvent.getPointerId(bestIdx)
+                                    val screenPoint = Offset(motionEvent.getX(bestIdx), motionEvent.getY(bestIdx))
+                                    val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+
+                                    if (state.currentTool == DrawingTool.HAND) {
+                                        previousFocalPoint = screenPoint
+                                    } else {
+                                        val pressure = motionEvent.getPressure(bestIdx).coerceIn(0.1f, 1.0f)
+                                        when (state.currentTool) {
+                                            DrawingTool.PEN,
+                                            DrawingTool.HIGHLIGHTER -> state.startStroke(canvasPoint, pressure)
+                                            DrawingTool.STROKE_ERASER,
+                                            DrawingTool.SEGMENT_ERASER -> {
+                                                state.startErasing()
+                                                val eraserRadius = state.viewportState.screenToCanvasDist(32f)
+                                                state.eraseAt(canvasPoint, eraserRadius)
+                                            }
+                                            DrawingTool.SHAPE -> state.startShape(canvasPoint)
+                                            else -> {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     MotionEvent.ACTION_MOVE -> {
-                        val screenPoint = Offset(motionEvent.x, motionEvent.y)
-                        val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
-
                         // Cancel pending long press if user moved finger before long-press timer elapsed
                         if (pendingTouchTextBoxId != null && !isMovingTextBox && !isResizingTextBox) {
+                            val screenPoint = Offset(motionEvent.x, motionEvent.y)
+                            val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
                             val dTouch = canvasPoint - initialTouchCanvas
                             val dist = hypot(dTouch.x, dTouch.y)
                             if (dist > state.viewportState.screenToCanvasDist(12f)) {
@@ -253,6 +290,8 @@ fun TabletCanvasView(
 
                         // Handle active text box moving
                         if (isMovingTextBox && state.selectedTextBoxId != null) {
+                            val screenPoint = Offset(motionEvent.x, motionEvent.y)
+                            val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
                             val delta = canvasPoint - lastTouchCanvas
                             lastTouchCanvas = canvasPoint
                             state.moveTextBox(state.selectedTextBoxId!!, delta)
@@ -261,6 +300,8 @@ fun TabletCanvasView(
 
                         // Handle active text box resizing
                         if (isResizingTextBox && state.selectedTextBoxId != null) {
+                            val screenPoint = Offset(motionEvent.x, motionEvent.y)
+                            val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
                             val selected = state.currentPage.textBoxes.firstOrNull { it.id == state.selectedTextBoxId }
                             if (selected != null) {
                                 val bounds = getTextBoxBounds(selected)
@@ -271,11 +312,13 @@ fun TabletCanvasView(
                             return@pointerInteropFilter true
                         }
 
-                        if (isViewportGestureActive || pointerCount >= 2) {
-                            // Viewport Pan & Pinch-Zoom
-                            if (pointerCount >= 2) {
-                                val p0 = Offset(motionEvent.getX(0), motionEvent.getY(0))
-                                val p1 = Offset(motionEvent.getX(1), motionEvent.getY(1))
+                        if (isViewportGestureActive) {
+                            val i0 = viewportPointer0Id?.let { motionEvent.findPointerIndex(it) } ?: -1
+                            val i1 = viewportPointer1Id?.let { motionEvent.findPointerIndex(it) } ?: -1
+
+                            if (i0 >= 0 && i1 >= 0) {
+                                val p0 = Offset(motionEvent.getX(i0), motionEvent.getY(i0))
+                                val p1 = Offset(motionEvent.getX(i1), motionEvent.getY(i1))
                                 val currentFocal = (p0 + p1) / 2f
                                 val currentSpan = hypot(p1.x - p0.x, p1.y - p0.y).coerceAtLeast(1f)
 
@@ -290,47 +333,66 @@ fun TabletCanvasView(
 
                                 previousFocalPoint = currentFocal
                                 previousSpan = currentSpan
-                            } else if (pointerCount == 1 && previousFocalPoint != null) {
-                                val currentFocal = Offset(motionEvent.x, motionEvent.y)
-                                val delta = currentFocal - previousFocalPoint!!
-                                state.viewportState.panBy(delta)
-                                previousFocalPoint = currentFocal
                             }
-                        } else {
-                            // Single pointer drawing / erasing / shaping
-                            val verdict = inputClassifier.evaluateTouch(
-                                event = motionEvent,
-                                pointerIndex = 0,
-                                containerWidth = state.viewportState.containerSize.width,
-                                containerHeight = state.viewportState.containerSize.height,
-                                activePointersCount = 1
-                            )
+                        } else if (activeDrawingPointerId != null) {
+                            val fingerIdx = motionEvent.findPointerIndex(activeDrawingPointerId!!)
+                            if (fingerIdx >= 0) {
+                                if (!isPalm(fingerIdx)) {
+                                    val screenPoint = Offset(motionEvent.getX(fingerIdx), motionEvent.getY(fingerIdx))
+                                    val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
 
-                            if (verdict == InputVerdict.ACCEPT_FOR_DRAWING) {
-                                val pressure = motionEvent.pressure.coerceIn(0.1f, 1.0f)
-
-                                when (state.currentTool) {
-                                    DrawingTool.PEN,
-                                    DrawingTool.HIGHLIGHTER -> {
-                                        state.appendStrokePoint(canvasPoint, pressure)
+                                    if (state.currentTool == DrawingTool.HAND) {
+                                        if (previousFocalPoint != null) {
+                                            val delta = screenPoint - previousFocalPoint!!
+                                            state.viewportState.panBy(delta)
+                                        }
+                                        previousFocalPoint = screenPoint
+                                    } else {
+                                        val pressure = motionEvent.getPressure(fingerIdx).coerceIn(0.1f, 1.0f)
+                                        when (state.currentTool) {
+                                            DrawingTool.PEN,
+                                            DrawingTool.HIGHLIGHTER -> {
+                                                state.appendStrokePoint(canvasPoint, pressure)
+                                            }
+                                            DrawingTool.STROKE_ERASER,
+                                            DrawingTool.SEGMENT_ERASER -> {
+                                                val eraserRadius = state.viewportState.screenToCanvasDist(32f)
+                                                state.eraseAt(canvasPoint, eraserRadius)
+                                            }
+                                            DrawingTool.SHAPE -> {
+                                                state.updateShape(canvasPoint)
+                                            }
+                                            else -> {}
+                                        }
                                     }
-                                    DrawingTool.STROKE_ERASER,
-                                    DrawingTool.SEGMENT_ERASER -> {
-                                        val eraserRadius = state.viewportState.screenToCanvasDist(32f)
-                                        state.eraseAt(canvasPoint, eraserRadius)
-                                    }
-                                    DrawingTool.SHAPE -> {
-                                        state.updateShape(canvasPoint)
-                                    }
-                                    else -> {}
                                 }
                             }
                         }
                     }
 
                     MotionEvent.ACTION_POINTER_UP -> {
-                        previousFocalPoint = null
-                        previousSpan = 0f
+                        val liftedIndex = motionEvent.actionIndex
+                        val liftedId = motionEvent.getPointerId(liftedIndex)
+
+                        if (liftedId == viewportPointer0Id || liftedId == viewportPointer1Id) {
+                            isViewportGestureActive = false
+                            previousFocalPoint = null
+                            previousSpan = 0f
+                            viewportPointer0Id = null
+                            viewportPointer1Id = null
+                        }
+
+                        if (liftedId == activeDrawingPointerId) {
+                            when (state.currentTool) {
+                                DrawingTool.PEN,
+                                DrawingTool.HIGHLIGHTER -> state.finishStroke()
+                                DrawingTool.STROKE_ERASER,
+                                DrawingTool.SEGMENT_ERASER -> state.finishErasing()
+                                DrawingTool.SHAPE -> state.finishShape()
+                                else -> {}
+                            }
+                            activeDrawingPointerId = null
+                        }
                     }
 
                     MotionEvent.ACTION_UP -> {
@@ -356,25 +418,22 @@ fun TabletCanvasView(
                             }
                         }
 
-                        if (isViewportGestureActive) {
-                            isViewportGestureActive = false
-                            previousFocalPoint = null
-                            previousSpan = 0f
-                        } else {
+                        isViewportGestureActive = false
+                        previousFocalPoint = null
+                        previousSpan = 0f
+                        viewportPointer0Id = null
+                        viewportPointer1Id = null
+
+                        if (activeDrawingPointerId != null) {
                             when (state.currentTool) {
                                 DrawingTool.PEN,
-                                DrawingTool.HIGHLIGHTER -> {
-                                    state.finishStroke()
-                                }
+                                DrawingTool.HIGHLIGHTER -> state.finishStroke()
                                 DrawingTool.STROKE_ERASER,
-                                DrawingTool.SEGMENT_ERASER -> {
-                                    state.finishErasing()
-                                }
-                                DrawingTool.SHAPE -> {
-                                    state.finishShape()
-                                }
+                                DrawingTool.SEGMENT_ERASER -> state.finishErasing()
+                                DrawingTool.SHAPE -> state.finishShape()
                                 else -> {}
                             }
+                            activeDrawingPointerId = null
                         }
                     }
 
@@ -384,11 +443,15 @@ fun TabletCanvasView(
                         isMovingTextBox = false
                         isResizingTextBox = false
                         pendingTouchTextBoxId = null
-                        state.cancelStroke()
-                        state.activeShape = null
                         isViewportGestureActive = false
                         previousFocalPoint = null
                         previousSpan = 0f
+                        viewportPointer0Id = null
+                        viewportPointer1Id = null
+                        if (state.activeStroke != null) state.cancelStroke()
+                        if (state.activeShape != null) state.activeShape = null
+                        if (state.isErasing) state.finishErasing()
+                        activeDrawingPointerId = null
                     }
                 }
                 true

@@ -67,6 +67,7 @@ import com.scribidoo.app.canvas.state.CanvasState
 import com.scribidoo.app.data.DocumentStorageManager
 import com.scribidoo.app.export.CanvasExporter
 import com.scribidoo.app.pdf.PdfDocumentManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -104,6 +105,26 @@ fun CanvasWorkspaceScreen(
                     Toast.makeText(context, "Failed to load PDF: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                 }
             }
+        }
+    }
+
+    var isLoaded by remember { mutableStateOf(false) }
+
+    // Auto-load last modified document on launch
+    LaunchedEffect(Unit) {
+        val docs = storageManager.listDocuments()
+        if (docs.isNotEmpty()) {
+            val mostRecent = docs.first()
+            state.loadDocument(mostRecent)
+        }
+        isLoaded = true
+    }
+
+    // Auto-save whenever document changes
+    LaunchedEffect(state.document) {
+        if (isLoaded) {
+            delay(500)
+            storageManager.saveDocument(state.document)
         }
     }
 

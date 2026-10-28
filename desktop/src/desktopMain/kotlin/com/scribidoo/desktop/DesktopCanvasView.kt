@@ -74,10 +74,7 @@ import kotlin.math.hypot
 @Composable
 fun DesktopCanvasView(
     state: CanvasState,
-    modifier: Modifier = Modifier,
-    isPalmShieldVisible: Boolean = false,
-    palmShieldHeightPx: Float = 260f,
-    onPalmShieldHeightChange: (Float) -> Unit = {}
+    modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
     val textMeasurer = rememberTextMeasurer()
@@ -152,25 +149,11 @@ fun DesktopCanvasView(
                                     val screenPoint = change.position
                                     val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
 
-                                    // Palm Rest Shield check
-                                    val containerH = state.viewportState.containerSize.height
-                                    val isInsidePalmShield = isPalmShieldVisible && containerH > 0 && screenPoint.y >= (containerH - palmShieldHeightPx)
-                                    if (isInsidePalmShield) {
-                                        if (state.activeStroke != null) state.cancelStroke()
-                                        if (state.activeShape != null) state.activeShape = null
-                                        change.consume()
-                                        continue
-                                    }
-
                                     // 1. Navigation / Pan triggers:
-                                    // - Hand / Pan tool selected
                                     val isHandTool = state.currentTool == DrawingTool.HAND
-                                    // - Right-click or middle-click drag with mouse
                                     val isMousePan = change.type == PointerType.Mouse && (event.buttons.isSecondaryPressed || event.buttons.isTertiaryPressed)
-                                    // - Touch pan when finger drawing is disabled (Stylus Only / Palm rejection mode)
-                                    val isTouchPan = change.type == PointerType.Touch && !state.palmConfig.isFingerDrawingEnabled
 
-                                    if (isHandTool || isMousePan || isTouchPan) {
+                                    if (isHandTool || isMousePan) {
                                         isPanDragging = true
                                         lastPanScreenPoint = screenPoint
                                         if (state.activeStroke != null) state.cancelStroke()
@@ -333,16 +316,6 @@ fun DesktopCanvasView(
                                     val change = changes.first()
                                     val screenPoint = change.position
                                     val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
-
-                                    // Palm Rest Shield check
-                                    val containerH = state.viewportState.containerSize.height
-                                    val isInsidePalmShield = isPalmShieldVisible && containerH > 0 && screenPoint.y >= (containerH - palmShieldHeightPx)
-                                    if (isInsidePalmShield) {
-                                        if (state.activeStroke != null) state.cancelStroke()
-                                        if (state.activeShape != null) state.activeShape = null
-                                        change.consume()
-                                        continue
-                                    }
 
                                     if (isStylusErasing || change.type == PointerType.Eraser) {
                                         val eraserRadius = state.viewportState.screenToCanvasDist(36f)
@@ -524,59 +497,6 @@ fun DesktopCanvasView(
             }
         }
 
-        // 5. Draggable Palm Rest Shield (Writing Guard)
-        if (isPalmShieldVisible) {
-            val density = LocalDensity.current
-            val guardHeightDp = with(density) { palmShieldHeightPx.toDp() }
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(guardHeightDp)
-                    .background(Color(0x332563EB))
-                    .border(
-                        width = 1.5.dp,
-                        color = Color(0x882563EB),
-                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-                    )
-            ) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .offset(y = (-14).dp)
-                        .pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                val newHeight = (palmShieldHeightPx - dragAmount.y).coerceIn(120f, 650f)
-                                onPalmShieldHeightChange(newHeight)
-                            }
-                        },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    shadowElevation = 6.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DragHandle,
-                            contentDescription = "Adjust Guard Height",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Palm Rest Guard (Rest palm here / Drag to resize)",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 

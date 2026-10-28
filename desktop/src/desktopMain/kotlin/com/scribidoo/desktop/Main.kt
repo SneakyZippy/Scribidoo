@@ -73,9 +73,6 @@ fun main() = application {
         var exportSuccessMessage by remember { mutableStateOf<String?>(null) }
         var renameInput by remember { mutableStateOf("") }
 
-        var isPalmShieldVisible by remember { mutableStateOf(false) }
-        var palmShieldHeightPx by remember { mutableFloatStateOf(260f) }
-
         // Autosave whenever document changes
         LaunchedEffect(state.document) {
             DesktopStorageManager.saveAutoSave(state.document)
@@ -94,10 +91,7 @@ fun main() = application {
                 // 1. Edge-to-Edge Canvas
                 DesktopCanvasView(
                     state = state,
-                    modifier = Modifier.fillMaxSize(),
-                    isPalmShieldVisible = isPalmShieldVisible,
-                    palmShieldHeightPx = palmShieldHeightPx,
-                    onPalmShieldHeightChange = { palmShieldHeightPx = it }
+                    modifier = Modifier.fillMaxSize()
                 )
 
                 // 2. Compact Document Capsule in Top Corner
@@ -193,8 +187,6 @@ fun main() = application {
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 24.dp),
-                    isPalmShieldVisible = isPalmShieldVisible,
-                    onTogglePalmShield = { isPalmShieldVisible = !isPalmShieldVisible },
                     onOpenSettings = { showSettingsDialog = true }
                 )
 

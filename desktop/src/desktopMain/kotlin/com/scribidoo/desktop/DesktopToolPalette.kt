@@ -76,8 +76,6 @@ enum class DesktopToolbarOrientation {
 fun DesktopToolPalette(
     state: CanvasState,
     modifier: Modifier = Modifier,
-    isPalmShieldVisible: Boolean = false,
-    onTogglePalmShield: () -> Unit = {},
     onOpenSettings: () -> Unit = {}
 ) {
     var orientation by remember { mutableStateOf(DesktopToolbarOrientation.HORIZONTAL) }
@@ -173,8 +171,6 @@ fun DesktopToolPalette(
 
                     Box(modifier = Modifier.height(24.dp).width(1.dp).background(Color(0x1F000000)))
 
-                    FingerTool(state)
-                    PalmShieldTool(isPalmShieldVisible, onTogglePalmShield)
                     UndoTool(state)
                     RedoTool(state)
                     ZoomInTool(state)
@@ -291,14 +287,6 @@ fun DesktopToolPalette(
                     }
 
                     Box(modifier = Modifier.width(68.dp).height(1.dp).background(Color(0x1F000000)))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FingerTool(state)
-                        PalmShieldTool(isPalmShieldVisible, onTogglePalmShield)
-                    }
 
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
