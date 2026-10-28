@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -54,7 +55,9 @@ import androidx.compose.ui.window.application
 import com.scribidoo.app.canvas.input.DominantHand
 import com.scribidoo.app.canvas.input.PalmRejectionConfig
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
+import com.scribidoo.app.canvas.model.DocumentModel
 import com.scribidoo.app.canvas.state.CanvasState
+import kotlinx.coroutines.delay
 
 fun main() = application {
     Window(
@@ -62,10 +65,21 @@ fun main() = application {
         title = "Scribidoo - Canvas for Windows Touch PC",
         state = WindowState(width = 1280.dp, height = 800.dp)
     ) {
-        val state = remember { CanvasState() }
+        val savedDoc = remember { DesktopStorageManager.loadAutoSave() }
+        val state = remember { CanvasState(initialDocument = savedDoc ?: DocumentModel()) }
         var showSettingsDialog by remember { mutableStateOf(false) }
         var showRenameDialog by remember { mutableStateOf(false) }
+        var showExportDialog by remember { mutableStateOf(false) }
+        var exportSuccessMessage by remember { mutableStateOf<String?>(null) }
         var renameInput by remember { mutableStateOf("") }
+
+        var isPalmShieldVisible by remember { mutableStateOf(false) }
+        var palmShieldHeightPx by remember { mutableFloatStateOf(260f) }
+
+        // Autosave whenever document changes
+        LaunchedEffect(state.document) {
+            DesktopStorageManager.saveAutoSave(state.document)
+        }
 
         // Initial page center fit
         LaunchedEffect(state.viewportState.containerSize) {
@@ -80,7 +94,10 @@ fun main() = application {
                 // 1. Edge-to-Edge Canvas
                 DesktopCanvasView(
                     state = state,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    isPalmShieldVisible = isPalmShieldVisible,
+                    palmShieldHeightPx = palmShieldHeightPx,
+                    onPalmShieldHeightChange = { palmShieldHeightPx = it }
                 )
 
                 // 2. Compact Document Capsule in Top Corner
@@ -153,6 +170,20 @@ fun main() = application {
                         ) {
                             Icon(Icons.Default.Add, contentDescription = "Add New Page")
                         }
+
+                        Box(modifier = Modifier.height(18.dp).width(1.dp).background(Color(0x1F000000)))
+
+                        // Export Button
+                        IconButton(
+                            onClick = { showExportDialog = true },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FileDownload,
+                                contentDescription = "Export to PNG",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
 
@@ -162,6 +193,8 @@ fun main() = application {
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 24.dp),
+                    isPalmShieldVisible = isPalmShieldVisible,
+                    onTogglePalmShield = { isPalmShieldVisible = !isPalmShieldVisible },
                     onOpenSettings = { showSettingsDialog = true }
                 )
 
@@ -238,6 +271,78 @@ fun main() = application {
                             }
                         }
                     )
+                }
+
+                // 7. Export Dialog
+                if (showExportDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showExportDialog = false },
+                        title = { Text("Export Document") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("Export high-resolution PNG images to Pictures/Scribidoo:", fontSize = 13.sp)
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val file = DesktopExporter.exportPageToPng(state.currentPage, state.document.title)
+                                            exportSuccessMessage = "Exported: ${file.name}"
+                                        } catch (e: Exception) {
+                                            exportSuccessMessage = "Export failed: ${e.message}"
+                                        }
+                                        showExportDialog = false
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Export Current Page (PNG)")
+                                }
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val files = DesktopExporter.exportDocumentToPngs(state.document)
+                                            exportSuccessMessage = "Exported ${files.size} pages to Pictures/Scribidoo"
+                                        } catch (e: Exception) {
+                                            exportSuccessMessage = "Export failed: ${e.message}"
+                                        }
+                                        showExportDialog = false
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Export All Pages (PNG)")
+                                }
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {
+                            TextButton(onClick = { showExportDialog = false }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
+
+                // 8. Notification Toast / Banner
+                if (exportSuccessMessage != null) {
+                    LaunchedEffect(exportSuccessMessage) {
+                        delay(3500)
+                        exportSuccessMessage = null
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 18.dp)
+                            .shadow(8.dp, RoundedCornerShape(14.dp)),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.inverseSurface,
+                        tonalElevation = 6.dp
+                    ) {
+                        Text(
+                            text = exportSuccessMessage!!,
+                            color = MaterialTheme.colorScheme.inverseOnSurface,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
+                        )
+                    }
                 }
             }
         }

@@ -20,7 +20,8 @@ enum class DrawingTool {
     SEGMENT_ERASER,
     SHAPE,
     TEXT,
-    LASSO
+    LASSO,
+    HAND
 }
 
 enum class ShapeType {

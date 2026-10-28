@@ -183,8 +183,13 @@ fun TabletCanvasView(
                                     DrawingTool.HIGHLIGHTER -> {
                                         state.startStroke(canvasPoint, pressure)
                                     }
+                                    DrawingTool.HAND -> {
+                                        isViewportGestureActive = true
+                                        previousFocalPoint = Offset(motionEvent.x, motionEvent.y)
+                                    }
                                     DrawingTool.STROKE_ERASER,
                                     DrawingTool.SEGMENT_ERASER -> {
+                                        state.startErasing()
                                         val eraserRadius = state.viewportState.screenToCanvasDist(32f)
                                         state.eraseAt(canvasPoint, eraserRadius)
                                     }
@@ -360,6 +365,10 @@ fun TabletCanvasView(
                                 DrawingTool.PEN,
                                 DrawingTool.HIGHLIGHTER -> {
                                     state.finishStroke()
+                                }
+                                DrawingTool.STROKE_ERASER,
+                                DrawingTool.SEGMENT_ERASER -> {
+                                    state.finishErasing()
                                 }
                                 DrawingTool.SHAPE -> {
                                     state.finishShape()

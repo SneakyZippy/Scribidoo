@@ -150,6 +150,7 @@ fun FloatingToolPalette(
                     TactileGrip(isHorizontal = true, modifier = dragModifier)
 
                     // Core Drawing Tools
+                    HandTool(state)
                     PenTool(state)
                     HighlighterTool(state)
                     EraserTool(state)
@@ -230,7 +231,15 @@ fun FloatingToolPalette(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // Row 1: Pen + Highlighter
+                    // Row 1: Pan / Hand Tool
+                    Row(
+                        modifier = Modifier.width(76.dp),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        HandTool(state)
+                    }
+
+                    // Row 2: Pen + Highlighter
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         PenTool(state)
                         HighlighterTool(state)
@@ -333,6 +342,16 @@ fun FloatingToolPalette(
             }
         }
     }
+}
+
+@Composable
+private fun HandTool(state: CanvasState) {
+    ToolButton(
+        icon = Icons.Default.PanTool,
+        label = "Pan Tool",
+        isSelected = state.currentTool == DrawingTool.HAND,
+        onClick = { state.currentTool = DrawingTool.HAND }
+    )
 }
 
 @Composable
@@ -682,6 +701,7 @@ private fun HorizontalStatusRow(state: CanvasState) {
             DrawingTool.SHAPE -> "Shape"
             DrawingTool.TEXT -> "Text"
             DrawingTool.LASSO -> "Lasso"
+            DrawingTool.HAND -> "Pan"
         }
         Text(text = toolName, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
         Text(

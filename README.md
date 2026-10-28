@@ -4,16 +4,14 @@ A fast, distraction-free handwritten note-taking and sketching app built with Ko
 
 ## Highlights
 
-- **Active Stylus First**: Low-latency ink rendering with quadratic Bézier smoothing and pressure sensitivity.
-- **Configurable Palm Rejection**: Digitizer hover priority with adjustable finger & palm rejection thresholds so you can rest your hand on the glass.
-- **Floating Toolbar**: Drag it anywhere on screen. Switch between a 1-row horizontal bar or a compact 2-column vertical dock.
-- **Canvas Flexibility**: Paged sheets (A4/letter) or an infinite dot-grid canvas with smooth pan & pinch-zoom.
-- **Inking Tools**:
-  - Fountain & Ballpoint Pen with pressure-sensitive width.
-  - Chisel-tip Highlighter with multiply blend-mode layering.
-  - Precision point eraser & whole-stroke eraser.
-  - Movable & resizable text boxes (long-press to reposition or resize).
-- **Import & Export**: Annotate imported PDFs/images and export pages as high-resolution PNGs or multi-page PDFs.
+- **Active Stylus & Touch First**: Low-latency vector inking with quadratic Bézier smoothing and pressure sensitivity.
+- **Draggable Palm Rest Guard (Writing Shield)**: Semi-transparent resting guard at the bottom of the screen with a resize handle. Rest your hand comfortably on the glass while writing with a passive stylus or finger!
+- **Dedicated Hand / Pan Tool**: Instant one-touch canvas movement without delays or holding.
+- **2-Finger Pan & Pinch-Zoom**: Smooth multi-touch navigation across the canvas, plus quick `+`, `-`, and Fit buttons.
+- **Automatic Auto-Save**: Preserves your notebook notes in real-time (`%LocalAppData%\Scribidoo\autosave.json`) so nothing is ever lost on app restart.
+- **One-Click Export**: Save high-resolution PNG pages directly to your Pictures/Scribidoo folder with a single click.
+- **Floating Toolbar**: Draggable floating dock switchable between horizontal and compact 2-column vertical modes.
+- **Canvas Flexibility**: Paged A4 sheets with page navigation, or an infinite dot-grid canvas.
 
 ## Architecture
 

@@ -29,9 +29,12 @@ import androidx.compose.material.icons.filled.HorizontalSplit
 import androidx.compose.material.icons.filled.ModeEdit
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.VerticalSplit
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -73,6 +76,8 @@ enum class DesktopToolbarOrientation {
 fun DesktopToolPalette(
     state: CanvasState,
     modifier: Modifier = Modifier,
+    isPalmShieldVisible: Boolean = false,
+    onTogglePalmShield: () -> Unit = {},
     onOpenSettings: () -> Unit = {}
 ) {
     var orientation by remember { mutableStateOf(DesktopToolbarOrientation.HORIZONTAL) }
@@ -141,6 +146,7 @@ fun DesktopToolPalette(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    HandTool(state)
                     PenTool(state)
                     HighlighterTool(state)
                     EraserTool(state)
@@ -168,8 +174,11 @@ fun DesktopToolPalette(
                     Box(modifier = Modifier.height(24.dp).width(1.dp).background(Color(0x1F000000)))
 
                     FingerTool(state)
+                    PalmShieldTool(isPalmShieldVisible, onTogglePalmShield)
                     UndoTool(state)
                     RedoTool(state)
+                    ZoomInTool(state)
+                    ZoomOutTool(state)
                     FitTool(state)
 
                     Box(modifier = Modifier.height(24.dp).width(1.dp).background(Color(0x1F000000)))
@@ -259,21 +268,26 @@ fun DesktopToolPalette(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        HandTool(state)
                         PenTool(state)
-                        HighlighterTool(state)
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        HighlighterTool(state)
                         EraserTool(state)
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         ShapeTool(state, showShapeMenu, onShowShapeMenuChange = { showShapeMenu = it })
+                        TextTool(state)
                     }
 
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextTool(state)
                         ColorTool(state, presetColors, showColorMenu, onShowColorMenuChange = { showColorMenu = it })
+                        WidthTool(state, showWidthMenu, onShowWidthMenuChange = { showWidthMenu = it })
                     }
 
                     Box(modifier = Modifier.width(68.dp).height(1.dp).background(Color(0x1F000000)))
@@ -282,8 +296,15 @@ fun DesktopToolPalette(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        WidthTool(state, showWidthMenu, onShowWidthMenuChange = { showWidthMenu = it })
                         FingerTool(state)
+                        PalmShieldTool(isPalmShieldVisible, onTogglePalmShield)
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FitTool(state)
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -291,10 +312,14 @@ fun DesktopToolPalette(
                         RedoTool(state)
                     }
 
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        ZoomInTool(state)
+                        ZoomOutTool(state)
+                    }
+
                     Box(modifier = Modifier.width(68.dp).height(1.dp).background(Color(0x1F000000)))
 
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        FitTool(state)
                         IconButton(
                             onClick = { orientation = DesktopToolbarOrientation.HORIZONTAL },
                             modifier = Modifier.size(36.dp)
@@ -557,6 +582,29 @@ private fun FingerTool(state: CanvasState) {
 }
 
 @Composable
+private fun PalmShieldTool(
+    isActive: Boolean,
+    onToggle: () -> Unit
+) {
+    IconButton(
+        onClick = onToggle,
+        modifier = Modifier
+            .size(36.dp)
+            .background(
+                if (isActive) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+    ) {
+        Icon(
+            imageVector = Icons.Default.Shield,
+            contentDescription = if (isActive) "Hide Palm Rest Guard" else "Show Palm Rest Guard",
+            tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@Composable
 private fun UndoTool(state: CanvasState) {
     IconButton(
         onClick = { state.undo() },
@@ -575,6 +623,47 @@ private fun RedoTool(state: CanvasState) {
         modifier = Modifier.size(36.dp)
     ) {
         Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", modifier = Modifier.size(19.dp))
+    }
+}
+
+@Composable
+private fun HandTool(state: CanvasState) {
+    val isHand = state.currentTool == DrawingTool.HAND
+    IconButton(
+        onClick = { state.currentTool = DrawingTool.HAND },
+        modifier = Modifier
+            .size(36.dp)
+            .background(
+                if (isHand) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+    ) {
+        Icon(
+            imageVector = Icons.Default.PanTool,
+            contentDescription = "Pan Tool",
+            tint = if (isHand) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@Composable
+private fun ZoomInTool(state: CanvasState) {
+    IconButton(
+        onClick = { state.viewportState.zoomBy(1.25f) },
+        modifier = Modifier.size(36.dp)
+    ) {
+        Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+private fun ZoomOutTool(state: CanvasState) {
+    IconButton(
+        onClick = { state.viewportState.zoomBy(0.8f) },
+        modifier = Modifier.size(36.dp)
+    ) {
+        Icon(Icons.Default.ZoomOut, contentDescription = "Zoom Out", modifier = Modifier.size(20.dp))
     }
 }
 

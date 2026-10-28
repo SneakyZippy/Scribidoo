@@ -2,9 +2,24 @@ package com.scribidoo.desktop
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -12,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -32,10 +48,12 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.toSize
 import com.scribidoo.app.canvas.ink.EraserEngine
@@ -56,7 +74,10 @@ import kotlin.math.hypot
 @Composable
 fun DesktopCanvasView(
     state: CanvasState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isPalmShieldVisible: Boolean = false,
+    palmShieldHeightPx: Float = 260f,
+    onPalmShieldHeightChange: (Float) -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
     val textMeasurer = rememberTextMeasurer()
@@ -72,10 +93,11 @@ fun DesktopCanvasView(
     var pendingTouchTextBoxId by remember { mutableStateOf<String?>(null) }
 
     // Multi-touch tracking for Windows touch screens (2-finger pan & zoom)
+    val activePointers = remember { mutableMapOf<androidx.compose.ui.input.pointer.PointerId, Offset>() }
     var previousFocalPoint by remember { mutableStateOf<Offset?>(null) }
     var previousSpan by remember { mutableFloatStateOf(0f) }
 
-    // Navigation & Pan drag tracking (mouse right/middle-click drag or 1-finger drag in Stylus-only mode)
+    // Navigation & Pan drag tracking (Hand tool, mouse right/middle-click drag, or 1-finger drag in Stylus-only mode)
     var isPanDragging by remember { mutableStateOf(false) }
     var lastPanScreenPoint by remember { mutableStateOf(Offset.Zero) }
     var isStylusErasing by remember { mutableStateOf(false) }
@@ -107,28 +129,48 @@ fun DesktopCanvasView(
                             }
 
                             PointerEventType.Press -> {
-                                if (pointerCount >= 2) {
+                                for (c in changes) {
+                                    if (c.pressed) activePointers[c.id] = c.position
+                                }
+
+                                if (activePointers.size >= 2) {
                                     // 2-Finger Touch gesture on Windows Touch Screen
-                                    val p0 = changes[0].position
-                                    val p1 = changes[1].position
+                                    val pList = activePointers.values.toList()
+                                    val p0 = pList[0]
+                                    val p1 = pList[1]
                                     previousFocalPoint = (p0 + p1) / 2f
                                     previousSpan = hypot(p1.x - p0.x, p1.y - p0.y).coerceAtLeast(1f)
                                     if (state.activeStroke != null) state.cancelStroke()
                                     if (state.activeShape != null) state.activeShape = null
                                     isPanDragging = false
                                     isStylusErasing = false
+                                    longPressJob?.cancel()
+                                    longPressJob = null
+                                    changes.forEach { it.consume() }
                                 } else {
                                     val change = changes.first()
                                     val screenPoint = change.position
                                     val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
 
+                                    // Palm Rest Shield check
+                                    val containerH = state.viewportState.containerSize.height
+                                    val isInsidePalmShield = isPalmShieldVisible && containerH > 0 && screenPoint.y >= (containerH - palmShieldHeightPx)
+                                    if (isInsidePalmShield) {
+                                        if (state.activeStroke != null) state.cancelStroke()
+                                        if (state.activeShape != null) state.activeShape = null
+                                        change.consume()
+                                        continue
+                                    }
+
                                     // 1. Navigation / Pan triggers:
+                                    // - Hand / Pan tool selected
+                                    val isHandTool = state.currentTool == DrawingTool.HAND
                                     // - Right-click or middle-click drag with mouse
                                     val isMousePan = change.type == PointerType.Mouse && (event.buttons.isSecondaryPressed || event.buttons.isTertiaryPressed)
                                     // - Touch pan when finger drawing is disabled (Stylus Only / Palm rejection mode)
                                     val isTouchPan = change.type == PointerType.Touch && !state.palmConfig.isFingerDrawingEnabled
 
-                                    if (isMousePan || isTouchPan) {
+                                    if (isHandTool || isMousePan || isTouchPan) {
                                         isPanDragging = true
                                         lastPanScreenPoint = screenPoint
                                         if (state.activeStroke != null) state.cancelStroke()
@@ -247,12 +289,25 @@ fun DesktopCanvasView(
                             }
 
                             PointerEventType.Move -> {
-                                if (pointerCount >= 2) {
+                                for (c in changes) {
+                                    if (c.pressed) activePointers[c.id] = c.position
+                                    else activePointers.remove(c.id)
+                                }
+
+                                if (activePointers.size >= 2) {
                                     // 2-Finger pan & pinch-zoom on Windows Touch Screen
-                                    val p0 = changes[0].position
-                                    val p1 = changes[1].position
+                                    val pList = activePointers.values.toList()
+                                    val p0 = pList[0]
+                                    val p1 = pList[1]
                                     val currentFocal = (p0 + p1) / 2f
                                     val currentSpan = hypot(p1.x - p0.x, p1.y - p0.y).coerceAtLeast(1f)
+
+                                    if (state.activeStroke != null) state.cancelStroke()
+                                    if (state.activeShape != null) state.activeShape = null
+                                    isPanDragging = false
+                                    isStylusErasing = false
+                                    longPressJob?.cancel()
+                                    longPressJob = null
 
                                     val prevFocal = previousFocalPoint ?: currentFocal
                                     val delta = currentFocal - prevFocal
@@ -267,7 +322,7 @@ fun DesktopCanvasView(
                                     previousSpan = currentSpan
                                     changes.forEach { it.consume() }
                                 } else if (isPanDragging && changes.isNotEmpty()) {
-                                    // 1-Finger touch pan (in Stylus Only mode) or mouse right/middle drag pan
+                                    // Hand tool, 1-finger touch pan (Stylus Only mode), or mouse right/middle drag pan
                                     val change = changes.first()
                                     val screenPoint = change.position
                                     val delta = screenPoint - lastPanScreenPoint
@@ -278,6 +333,16 @@ fun DesktopCanvasView(
                                     val change = changes.first()
                                     val screenPoint = change.position
                                     val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+
+                                    // Palm Rest Shield check
+                                    val containerH = state.viewportState.containerSize.height
+                                    val isInsidePalmShield = isPalmShieldVisible && containerH > 0 && screenPoint.y >= (containerH - palmShieldHeightPx)
+                                    if (isInsidePalmShield) {
+                                        if (state.activeStroke != null) state.cancelStroke()
+                                        if (state.activeShape != null) state.activeShape = null
+                                        change.consume()
+                                        continue
+                                    }
 
                                     if (isStylusErasing || change.type == PointerType.Eraser) {
                                         val eraserRadius = state.viewportState.screenToCanvasDist(36f)
@@ -342,10 +407,15 @@ fun DesktopCanvasView(
                             }
 
                             PointerEventType.Release -> {
+                                for (c in changes) {
+                                    activePointers.remove(c.id)
+                                }
+                                if (activePointers.size < 2) {
+                                    previousFocalPoint = null
+                                    previousSpan = 0f
+                                }
                                 longPressJob?.cancel()
                                 longPressJob = null
-                                previousFocalPoint = null
-                                previousSpan = 0f
 
                                 if (isPanDragging) {
                                     isPanDragging = false
@@ -355,8 +425,13 @@ fun DesktopCanvasView(
 
                                 if (isStylusErasing) {
                                     isStylusErasing = false
+                                    state.finishErasing()
                                     changes.forEach { it.consume() }
                                     continue
+                                }
+
+                                if (state.currentTool == DrawingTool.STROKE_ERASER || state.currentTool == DrawingTool.SEGMENT_ERASER) {
+                                    state.finishErasing()
                                 }
 
                                 if (isMovingTextBox || isResizingTextBox) {
@@ -446,6 +521,60 @@ fun DesktopCanvasView(
                     selectedTextBoxId = state.selectedTextBoxId,
                     textMeasurer = textMeasurer
                 )
+            }
+        }
+
+        // 5. Draggable Palm Rest Shield (Writing Guard)
+        if (isPalmShieldVisible) {
+            val density = LocalDensity.current
+            val guardHeightDp = with(density) { palmShieldHeightPx.toDp() }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(guardHeightDp)
+                    .background(Color(0x332563EB))
+                    .border(
+                        width = 1.5.dp,
+                        color = Color(0x882563EB),
+                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                    )
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .offset(y = (-14).dp)
+                        .pointerInput(Unit) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                val newHeight = (palmShieldHeightPx - dragAmount.y).coerceIn(120f, 650f)
+                                onPalmShieldHeightChange(newHeight)
+                            }
+                        },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DragHandle,
+                            contentDescription = "Adjust Guard Height",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Palm Rest Guard (Rest palm here / Drag to resize)",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
         }
     }

@@ -50,30 +50,63 @@ class CanvasState(
     private val undoStack = mutableListOf<DocumentModel>()
     private val redoStack = mutableListOf<DocumentModel>()
 
-    val canUndo: Boolean get() = undoStack.isNotEmpty()
-    val canRedo: Boolean get() = redoStack.isNotEmpty()
+    var undoCount by mutableStateOf(0)
+        private set
+    var redoCount by mutableStateOf(0)
+        private set
+
+    val canUndo: Boolean get() = undoCount > 0
+    val canRedo: Boolean get() = redoCount > 0
 
     val currentPage: PageModel
         get() = document.pages.getOrElse(document.activePageIndex) { PageModel() }
 
-    private fun pushHistory() {
+    private var preEraseDocument: DocumentModel? = null
+
+    fun startErasing() {
+        if (preEraseDocument == null) {
+            preEraseDocument = document
+        }
+    }
+
+    fun finishErasing() {
+        val prev = preEraseDocument
+        preEraseDocument = null
+        if (prev != null && prev != document) {
+            undoStack.add(prev)
+            redoStack.clear()
+            if (undoStack.size > 50) {
+                undoStack.removeAt(0)
+            }
+            undoCount = undoStack.size
+            redoCount = 0
+        }
+    }
+
+    fun pushHistory() {
         undoStack.add(document)
         redoStack.clear()
         if (undoStack.size > 50) {
             undoStack.removeAt(0)
         }
+        undoCount = undoStack.size
+        redoCount = 0
     }
 
     fun undo() {
         if (!canUndo) return
         redoStack.add(document)
         document = undoStack.removeAt(undoStack.lastIndex)
+        undoCount = undoStack.size
+        redoCount = redoStack.size
     }
 
     fun redo() {
         if (!canRedo) return
         undoStack.add(document)
         document = redoStack.removeAt(redoStack.lastIndex)
+        undoCount = undoStack.size
+        redoCount = redoStack.size
     }
 
     fun toggleFingerDrawing() {
@@ -121,6 +154,7 @@ class CanvasState(
     }
 
     fun eraseAt(canvasPoint: Offset, eraserRadius: Float) {
+        startErasing()
         val curPage = currentPage
         // Also check if any text boxes intersect with eraser
         val remainingTextBoxes = curPage.textBoxes.filterNot { tb ->
@@ -136,7 +170,6 @@ class CanvasState(
                     EraserEngine.intersectsStroke(stroke, canvasPoint, eraserRadius)
                 }
                 if (remainingStrokes.size != curPage.strokes.size || textChanged) {
-                    pushHistory()
                     val updatedPages = document.pages.toMutableList()
                     updatedPages[document.activePageIndex] = curPage.copy(
                         strokes = remainingStrokes,
@@ -157,7 +190,6 @@ class CanvasState(
                     }
                 }
                 if (changed || textChanged) {
-                    pushHistory()
                     val updatedPages = document.pages.toMutableList()
                     updatedPages[document.activePageIndex] = curPage.copy(
                         strokes = newStrokes,
@@ -166,7 +198,20 @@ class CanvasState(
                     document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
                 }
             }
-            else -> {}
+            else -> {
+                // Also support active stylus eraser tail even when pen is selected
+                val remainingStrokes = curPage.strokes.filterNot { stroke ->
+                    EraserEngine.intersectsStroke(stroke, canvasPoint, eraserRadius)
+                }
+                if (remainingStrokes.size != curPage.strokes.size || textChanged) {
+                    val updatedPages = document.pages.toMutableList()
+                    updatedPages[document.activePageIndex] = curPage.copy(
+                        strokes = remainingStrokes,
+                        textBoxes = remainingTextBoxes
+                    )
+                    document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+                }
+            }
         }
     }
 
