@@ -1,5 +1,6 @@
 package com.scribidoo.desktop
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,6 +65,7 @@ fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "Scribidoo - Canvas for Windows Touch PC",
+        icon = painterResource("icon.png"),
         state = WindowState(width = 1280.dp, height = 800.dp)
     ) {
         val savedDoc = remember { DesktopStorageManager.loadAutoSave() }
@@ -110,6 +113,11 @@ fun main() = application {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        Image(
+                            painter = painterResource("scribidoo_brand_icon.png"),
+                            contentDescription = "Scribidoo",
+                            modifier = Modifier.size(24.dp)
+                        )
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))

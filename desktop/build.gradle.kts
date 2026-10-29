@@ -51,6 +51,7 @@ compose.desktop {
                 perUserInstall = true
                 menuGroup = "Scribidoo"
                 upgradeUuid = "8c6b7501-143d-4c31-97b7-6f6f9661fef4"
+                iconFile.set(project.file("src/desktopMain/resources/icon.ico"))
             }
         }
     }

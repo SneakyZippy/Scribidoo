@@ -4,6 +4,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,9 +23,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
@@ -67,11 +70,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.scribidoo.app.R
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.model.DocumentModel
 import com.scribidoo.app.canvas.state.CanvasState
@@ -89,6 +94,8 @@ import java.util.UUID
 @Composable
 fun CanvasWorkspaceScreen(
     modifier: Modifier = Modifier,
+    documentId: String? = null,
+    onNavigateBackToGallery: (() -> Unit)? = null,
     state: CanvasState = remember { CanvasState() }
 ) {
     val context = LocalContext.current
@@ -100,6 +107,7 @@ fun CanvasWorkspaceScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showBrandStickerDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
 
     // Launcher for PDF file selection
@@ -222,12 +230,23 @@ fun CanvasWorkspaceScreen(
 
     var isLoaded by remember { mutableStateOf(false) }
 
-    // Auto-load last modified document on launch
-    LaunchedEffect(Unit) {
-        val docs = storageManager.listDocuments()
-        if (docs.isNotEmpty()) {
-            val mostRecent = docs.first()
-            state.loadDocument(mostRecent)
+    // Load document on launch (specific document if requested, else blank/new document)
+    LaunchedEffect(documentId) {
+        if (documentId != null) {
+            val doc = storageManager.loadDocument(documentId)
+            if (doc != null) {
+                state.loadDocument(doc)
+            }
+        } else {
+            val docs = storageManager.listDocuments()
+            if (docs.isNotEmpty()) {
+                val mostRecent = docs.first()
+                state.loadDocument(mostRecent)
+            } else {
+                val newDoc = DocumentModel()
+                state.loadDocument(newDoc)
+                storageManager.saveDocument(newDoc)
+            }
         }
         isLoaded = true
     }
@@ -286,6 +305,32 @@ fun CanvasWorkspaceScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // Back to Gallery button
+                if (onNavigateBackToGallery != null) {
+                    IconButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                storageManager.saveDocument(state.document)
+                                onNavigateBackToGallery()
+                            }
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to Gallery",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .height(18.dp)
+                            .width(1.dp)
+                            .background(Color(0x22000000))
+                    )
+                }
+
                 // Clickable Note Title (tap to rename)
                 Row(
                     modifier = Modifier
@@ -391,6 +436,27 @@ fun CanvasWorkspaceScreen(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false }
                     ) {
+                        if (onNavigateBackToGallery != null) {
+                            DropdownMenuItem(
+                                text = { Text("Notebooks Gallery") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    coroutineScope.launch {
+                                        storageManager.saveDocument(state.document)
+                                        onNavigateBackToGallery()
+                                    }
+                                }
+                            )
+                            HorizontalDivider()
+                        }
                         DropdownMenuItem(
                             text = { Text("Save Document") },
                             leadingIcon = { Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(20.dp)) },
@@ -631,10 +697,21 @@ fun CanvasWorkspaceScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Choose how to add an image to your canvas:",
+                        text = "Choose how to add an image or sticker to your canvas:",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Button(
+                        onClick = {
+                            state.showImageSourceDialog = false
+                            showBrandStickerDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Scribidoo Brand Stickers & Art")
+                    }
                     Button(
                         onClick = {
                             state.showImageSourceDialog = false
@@ -673,6 +750,22 @@ fun CanvasWorkspaceScreen(
                 TextButton(onClick = { state.showImageSourceDialog = false }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    // Scribidoo Brand Art & Sticker Gallery Dialog
+    if (showBrandStickerDialog) {
+        BrandStickerGalleryDialog(
+            onDismiss = { showBrandStickerDialog = false },
+            onSelectSticker = { resId, defaultW, defaultH, label ->
+                val file = copyDrawableToFile(context, resId, "sticker_${resId}.png")
+                val center = state.viewportState.screenToCanvas(
+                    Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
+                )
+                state.addImage(file.absolutePath, defaultW, defaultH, center)
+                Toast.makeText(context, "Added $label sticker", Toast.LENGTH_SHORT).show()
+                showBrandStickerDialog = false
             }
         )
     }
@@ -765,6 +858,109 @@ fun TextBoxDialog(
                 TextButton(onClick = onDismiss) {
                     Text("Cancel")
                 }
+            }
+        }
+    )
+}
+
+private fun copyDrawableToFile(context: android.content.Context, resId: Int, fileName: String): File {
+    val dir = File(context.filesDir, "branding").apply { mkdirs() }
+    val outFile = File(dir, fileName)
+    if (!outFile.exists() || outFile.length() == 0L) {
+        val bitmap = android.graphics.BitmapFactory.decodeResource(context.resources, resId)
+        java.io.FileOutputStream(outFile).use { out ->
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+        }
+    }
+    return outFile
+}
+
+private data class StickerItem(
+    val resId: Int,
+    val label: String,
+    val defaultW: Float,
+    val defaultH: Float
+)
+
+@Composable
+fun BrandStickerGalleryDialog(
+    onDismiss: () -> Unit,
+    onSelectSticker: (resId: Int, defaultW: Float, defaultH: Float, label: String) -> Unit
+) {
+    val stickers = remember {
+        listOf(
+            StickerItem(R.drawable.scribidoo_logo_watercolor, "Watercolor Crest", 400f, 420f),
+            StickerItem(R.drawable.scribidoo_brand_icon, "Brand Icon & Stars", 350f, 390f),
+            StickerItem(R.drawable.scribidoo_logotype, "Script Logotype", 440f, 330f),
+            StickerItem(R.drawable.scribidoo_badge, "Monogram Badge", 320f, 320f)
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("Scribidoo Stickers & Art", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Tap any brand sticker to place it on your canvas (movable & resizable):",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                    columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.height(280.dp)
+                ) {
+                    items(stickers.size) { index ->
+                        val item = stickers[index]
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFFEFAF7),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x1F000000)),
+                            modifier = Modifier
+                                .clickable { onSelectSticker(item.resId, item.defaultW, item.defaultH, item.label) }
+                                .padding(2.dp)
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier.padding(8.dp)
+                            ) {
+                                Image(
+                                    painter = painterResource(id = item.resId),
+                                    contentDescription = item.label,
+                                    modifier = Modifier
+                                        .size(76.dp)
+                                        .padding(4.dp),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = item.label,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xDD000000),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
             }
         }
     )
