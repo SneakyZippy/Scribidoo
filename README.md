@@ -1,19 +1,21 @@
-# Scribidoo
-
-A fast, distraction-free handwritten note-taking and sketching app built with Kotlin & Compose Multiplatform. Designed specifically for active digitizer pens (Surface Pen, S-Pen, USI) on Android tablets and Windows Touch PCs.
-
-## Brand Identity Showcase
-
 <p align="center">
-  <img src="assets/branding/scribidoo_watercolor_crest.jpg" width="48%" alt="Scribidoo Watercolor Crest" />
-  <img src="assets/branding/scribidoo_brand_showcase.jpg" width="48%" alt="Scribidoo Brand Identity Showcase" />
+  <img src="assets/branding/scribidoo_logo.png" width="220" alt="Scribidoo Logo" />
 </p>
 
-Scribidoo features a playful, handcrafted brand identity tailored for digital sketchers and note-takers:
+<h1 align="center">Scribidoo</h1>
 
-- **01. Brand Icon (Monogram)**: Circular black badge with an elegant cursive 'S' surrounded by hand-drawn stars, sparkles, and stardust.
-- **02. Script Logotype**: Hand-lettered brush script typography with celestial accents.
-- **Watercolor Crest**: Vibrant pastel watercolor halo with the circular monogram and logotype lockup.
+<p align="center">
+  <b>A fast, distraction-free handwritten note-taking and sketching app built with Kotlin &amp; Compose Multiplatform.</b><br>
+  Designed specifically for active digitizer pens (Surface Pen, S-Pen, USI) on Android tablets and Windows Touch PCs.
+</p>
+
+<p align="center">
+  <a href="#highlights">Highlights</a> •
+  <a href="#architecture">Architecture</a> •
+  <a href="#getting-started">Getting Started</a> •
+  <a href="#gestures--controls">Gestures &amp; Controls</a> •
+  <a href="#license">License</a>
+</p>
 
 ---
 
