@@ -39,7 +39,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe
             )
             packageName = "Scribidoo"
-            packageVersion = "1.0.0"
+            packageVersion = "1.0.1"
             description = "Scribidoo - Handwritten note-taking and sketching app"
             copyright = "© 2026 Scribidoo"
             vendor = "Scribidoo"
