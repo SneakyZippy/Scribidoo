@@ -140,10 +140,11 @@ fun CanvasWorkspaceScreen(
     ) { success ->
         val file = activeCameraFile
         if (success && file != null && file.exists() && file.length() > 0) {
+            val (targetW, targetH) = calculateScaledImageDimensions(file)
             val center = state.viewportState.screenToCanvas(
                 Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
             )
-            state.addImage(file.absolutePath, 500f, 400f, center)
+            state.addImage(file.absolutePath, targetW, targetH, center)
             Toast.makeText(context, "Photo added to note", Toast.LENGTH_SHORT).show()
         }
         activeCameraFile = null
@@ -156,12 +157,13 @@ fun CanvasWorkspaceScreen(
     ) { uri ->
         if (uri != null) {
             coroutineScope.launch {
-                val file = copyUriToInternalFile(context, uri, "images", "img_${UUID.randomUUID()}.png")
+                val file = copyUriToInternalFile(context, uri, "images", "img")
                 if (file != null && file.exists()) {
+                    val (targetW, targetH) = calculateScaledImageDimensions(file)
                     val center = state.viewportState.screenToCanvas(
                         Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
                     )
-                    state.addImage(file.absolutePath, 500f, 400f, center)
+                    state.addImage(file.absolutePath, targetW, targetH, center)
                     Toast.makeText(context, "Picture added", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -174,7 +176,7 @@ fun CanvasWorkspaceScreen(
     ) { uri ->
         if (uri != null) {
             coroutineScope.launch {
-                val file = copyUriToInternalFile(context, uri, "audio", "audio_${UUID.randomUUID()}.m4a")
+                val file = copyUriToInternalFile(context, uri, "audio", "audio")
                 if (file != null && file.exists()) {
                     val center = state.viewportState.screenToCanvas(
                         Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
@@ -236,17 +238,15 @@ fun CanvasWorkspaceScreen(
             val doc = storageManager.loadDocument(documentId)
             if (doc != null) {
                 state.loadDocument(doc)
-            }
-        } else {
-            val docs = storageManager.listDocuments()
-            if (docs.isNotEmpty()) {
-                val mostRecent = docs.first()
-                state.loadDocument(mostRecent)
             } else {
-                val newDoc = DocumentModel()
+                val newDoc = DocumentModel(id = documentId)
                 state.loadDocument(newDoc)
                 storageManager.saveDocument(newDoc)
             }
+        } else {
+            val newDoc = DocumentModel()
+            state.loadDocument(newDoc)
+            storageManager.saveDocument(newDoc)
         }
         isLoaded = true
     }
@@ -771,9 +771,57 @@ fun CanvasWorkspaceScreen(
     }
 }
 
-private fun copyUriToInternalFile(context: android.content.Context, uri: Uri, subDir: String, targetFileName: String): File? {
+private fun calculateScaledImageDimensions(file: File, maxBound: Float = 600f): Pair<Float, Float> {
+    val options = android.graphics.BitmapFactory.Options().apply {
+        inJustDecodeBounds = true
+    }
+    android.graphics.BitmapFactory.decodeFile(file.absolutePath, options)
+    var rawW = options.outWidth.toFloat()
+    var rawH = options.outHeight.toFloat()
+    if (rawW <= 0f || rawH <= 0f) {
+        return Pair(400f, 300f)
+    }
+
+    try {
+        val exif = android.media.ExifInterface(file.absolutePath)
+        val orientation = exif.getAttributeInt(
+            android.media.ExifInterface.TAG_ORIENTATION,
+            android.media.ExifInterface.ORIENTATION_NORMAL
+        )
+        if (orientation == android.media.ExifInterface.ORIENTATION_ROTATE_90 ||
+            orientation == android.media.ExifInterface.ORIENTATION_ROTATE_270 ||
+            orientation == android.media.ExifInterface.ORIENTATION_TRANSPOSE ||
+            orientation == android.media.ExifInterface.ORIENTATION_TRANSVERSE
+        ) {
+            val tmp = rawW
+            rawW = rawH
+            rawH = tmp
+        }
+    } catch (_: Exception) {}
+
+    val scale = minOf(maxBound / rawW, maxBound / rawH, 1.0f)
+    val targetW = (rawW * scale).coerceAtLeast(100f)
+    val targetH = (rawH * scale).coerceAtLeast(100f)
+    return Pair(targetW, targetH)
+}
+
+private fun copyUriToInternalFile(context: android.content.Context, uri: Uri, subDir: String, basePrefix: String): File? {
     return try {
         val destDir = File(context.filesDir, subDir).apply { mkdirs() }
+        val mimeType = context.contentResolver.getType(uri)
+        val ext = when (mimeType) {
+            "image/jpeg" -> ".jpg"
+            "image/png" -> ".png"
+            "image/webp" -> ".webp"
+            "audio/mp4", "audio/m4a", "audio/x-m4a" -> ".m4a"
+            "audio/mpeg", "audio/mp3" -> ".mp3"
+            else -> {
+                val path = uri.path ?: ""
+                val dotIdx = path.lastIndexOf('.')
+                if (dotIdx != -1) path.substring(dotIdx) else if (subDir == "audio") ".m4a" else ".png"
+            }
+        }
+        val targetFileName = "${basePrefix}_${UUID.randomUUID()}$ext"
         val destFile = File(destDir, targetFileName)
         context.contentResolver.openInputStream(uri)?.use { input ->
             destFile.outputStream().use { output ->

@@ -24,7 +24,7 @@ fun MainNavigation() {
               backStack.add(CanvasNavKey(docId))
             },
             onNewDocument = {
-              backStack.add(CanvasNavKey(null))
+              backStack.add(CanvasNavKey(java.util.UUID.randomUUID().toString()))
             },
             modifier = Modifier.fillMaxSize()
           )
@@ -44,7 +44,7 @@ fun MainNavigation() {
               backStack.add(CanvasNavKey(docId))
             },
             onNewDocument = {
-              backStack.add(CanvasNavKey(null))
+              backStack.add(CanvasNavKey(java.util.UUID.randomUUID().toString()))
             },
             modifier = Modifier.fillMaxSize()
           )

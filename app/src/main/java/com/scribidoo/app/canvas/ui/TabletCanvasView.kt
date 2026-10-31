@@ -99,6 +99,8 @@ fun TabletCanvasView(
 
     var longPressJob by remember { mutableStateOf<Job?>(null) }
     var pendingTouchItem by remember { mutableStateOf<SelectedItem?>(null) }
+    var pendingAudioPlay by remember { mutableStateOf<AudioNoteModel?>(null) }
+    val strokePathCache = remember { mutableMapOf<String, androidx.compose.ui.graphics.Path>() }
     var initialTouchCanvas by remember { mutableStateOf(Offset.Zero) }
     var lastTouchCanvas by remember { mutableStateOf(Offset.Zero) }
     var initialItemWidth by remember { mutableFloatStateOf(100f) }
@@ -217,16 +219,13 @@ fun TabletCanvasView(
                             }
                         }
 
-                        // 3. Check if tapping an Audio Note PLAY button directly
+                        // 3. Check if tapping an Audio Note PLAY button directly (held for ACTION_UP so long-press doesn't play)
                         val hitAudioPlay = state.currentPage.audioNotes.lastOrNull { audio ->
                             val playCenter = Offset(audio.x + 44f, audio.y)
                             val touchDist = state.viewportState.screenToCanvasDist(26f)
                             hypot(canvasPoint.x - playCenter.x, canvasPoint.y - playCenter.y) <= touchDist
                         }
-                        if (hitAudioPlay != null) {
-                            audioManager.play(hitAudioPlay.localPath, hitAudioPlay.trimStartMs, hitAudioPlay.trimEndMs)
-                            return@pointerInteropFilter true
-                        }
+                        pendingAudioPlay = hitAudioPlay
 
                         // 4. Hit Testing for LONG-PRESS (Instant Lift & Drag)
                         val hitAudio = state.currentPage.audioNotes.lastOrNull { getAudioNoteBounds(it).contains(canvasPoint) }
@@ -249,6 +248,7 @@ fun TabletCanvasView(
                             longPressJob?.cancel()
                             longPressJob = coroutineScope.launch {
                                 delay(350)
+                                pendingAudioPlay = null // Cancel audio playback on long press lift
                                 state.selectedItem = hitItem
                                 isLiftingAndDragging = true
                                 isMovingItem = true
@@ -259,6 +259,7 @@ fun TabletCanvasView(
                             }
                         } else {
                             pendingTouchItem = null
+                            pendingAudioPlay = null
                             longPressJob?.cancel()
                         }
 
@@ -356,14 +357,15 @@ fun TabletCanvasView(
                             return@pointerInteropFilter true
                         }
 
-                        // Cancel pending long press if finger moved before 350ms elapsed
-                        if (pendingTouchItem != null && !isLiftingAndDragging && !isMovingItem && !isResizingItem) {
+                        // Cancel pending long press and audio play if finger moved before 350ms elapsed
+                        if ((pendingTouchItem != null || pendingAudioPlay != null) && !isLiftingAndDragging && !isMovingItem && !isResizingItem) {
                             val dTouch = canvasPoint - initialTouchCanvas
                             val dist = hypot(dTouch.x, dTouch.y)
                             if (dist > state.viewportState.screenToCanvasDist(12f)) {
                                 longPressJob?.cancel()
                                 longPressJob = null
                                 pendingTouchItem = null
+                                pendingAudioPlay = null
                             }
                         }
 
@@ -485,6 +487,7 @@ fun TabletCanvasView(
 
                         if (isMarginPanning) {
                             isMarginPanning = false
+                            pendingAudioPlay = null
                             return@pointerInteropFilter true
                         }
 
@@ -492,7 +495,17 @@ fun TabletCanvasView(
                             isLiftingAndDragging = false
                             isMovingItem = false
                             isResizingItem = false
+                            pendingAudioPlay = null
                             state.commitTransform()
+                            return@pointerInteropFilter true
+                        }
+
+                        // Play audio ONLY on genuine quick tap of the play button
+                        if (pendingAudioPlay != null) {
+                            val audioToPlay = pendingAudioPlay!!
+                            pendingAudioPlay = null
+                            pendingTouchItem = null
+                            audioManager.play(audioToPlay.localPath, audioToPlay.trimStartMs, audioToPlay.trimEndMs)
                             return@pointerInteropFilter true
                         }
 
@@ -541,6 +554,7 @@ fun TabletCanvasView(
                         isResizingItem = false
                         isMarginPanning = false
                         pendingTouchItem = null
+                        pendingAudioPlay = null
                         isViewportGestureActive = false
                         previousFocalPoint = null
                         previousSpan = 0f
@@ -590,7 +604,7 @@ fun TabletCanvasView(
                                 topLeft = Offset.Zero,
                                 size = Size(curPage.width, curPage.height)
                             )
-                            drawPaperGuidelines(curPage.width, curPage.height)
+                            drawPaperGuidelines(curPage.width, curPage.height, viewport.scale)
                         }
 
                         // Page border
@@ -624,9 +638,12 @@ fun TabletCanvasView(
                     // 2a. Images
                     drawImages(curPage.images, state.imageBitmaps)
 
-                    // 2b. Strokes (Highlighters first with Multiply blend, then Pens)
-                    for (stroke in allStrokes) {
-                        drawVectorStroke(stroke)
+                    // 2b. Strokes (Cached smooth paths for finished strokes, dynamic for active stroke)
+                    for (stroke in curPage.strokes) {
+                        drawVectorStroke(stroke, strokePathCache)
+                    }
+                    if (state.activeStroke != null) {
+                        drawVectorStroke(state.activeStroke!!, null)
                     }
 
                     // 2c. Shapes
@@ -667,9 +684,18 @@ fun TabletCanvasView(
     }
 }
 
-private fun DrawScope.drawVectorStroke(stroke: StrokeModel) {
+private fun DrawScope.drawVectorStroke(
+    stroke: StrokeModel,
+    pathCache: MutableMap<String, androidx.compose.ui.graphics.Path>?
+) {
     if (stroke.points.isEmpty()) return
-    val path = InkPathGenerator.createSmoothPath(stroke.points)
+    val path = if (pathCache != null) {
+        pathCache.getOrPut(stroke.id) {
+            InkPathGenerator.createSmoothPath(stroke.points)
+        }
+    } else {
+        InkPathGenerator.createSmoothPath(stroke.points)
+    }
 
     if (stroke.isHighlighter) {
         drawPath(
@@ -758,7 +784,10 @@ private fun DrawScope.drawVectorShape(shape: ShapeModel) {
     }
 }
 
-private fun DrawScope.drawPaperGuidelines(pageWidth: Float, pageHeight: Float) {
+private fun DrawScope.drawPaperGuidelines(pageWidth: Float, pageHeight: Float, scale: Float) {
+    // If lines would be drawn closer than 4 screen pixels, skip drawing them to prevent overdraw and lag
+    if (36f * scale < 4f) return
+
     val lineSpacing = 36f
     var y = 80f
     val lineColor = Color(0x18000000)
@@ -774,30 +803,36 @@ private fun DrawScope.drawPaperGuidelines(pageWidth: Float, pageHeight: Float) {
 }
 
 private fun DrawScope.drawInfiniteGrid(viewport: com.scribidoo.app.canvas.viewport.ViewportState) {
-    val gridSpacing = 40f
+    var effectiveSpacing = 40f
+    // Adaptive Level of Detail: maintain dot screen density between 20px and 45px
+    while (effectiveSpacing * viewport.scale < 24f) {
+        effectiveSpacing *= 2f
+    }
+
     val visibleLeft = viewport.screenToCanvas(Offset.Zero).x
     val visibleTop = viewport.screenToCanvas(Offset.Zero).y
     val visibleRight = viewport.screenToCanvas(Offset(viewport.containerSize.width, 0f)).x
     val visibleBottom = viewport.screenToCanvas(Offset(0f, viewport.containerSize.height)).y
 
-    val startX = (Math.floor((visibleLeft / gridSpacing).toDouble()) * gridSpacing).toFloat()
-    val endX = (Math.ceil((visibleRight / gridSpacing).toDouble()) * gridSpacing).toFloat()
-    val startY = (Math.floor((visibleTop / gridSpacing).toDouble()) * gridSpacing).toFloat()
-    val endY = (Math.ceil((visibleBottom / gridSpacing).toDouble()) * gridSpacing).toFloat()
+    val startX = (Math.floor((visibleLeft / effectiveSpacing).toDouble()) * effectiveSpacing).toFloat()
+    val endX = (Math.ceil((visibleRight / effectiveSpacing).toDouble()) * effectiveSpacing).toFloat()
+    val startY = (Math.floor((visibleTop / effectiveSpacing).toDouble()) * effectiveSpacing).toFloat()
+    val endY = (Math.ceil((visibleBottom / effectiveSpacing).toDouble()) * effectiveSpacing).toFloat()
 
     val dotColor = Color(0x309CA3AF)
+    val dotRadius = (1.5f / viewport.scale).coerceIn(1.2f, 4.0f)
     var x = startX
     while (x <= endX) {
         var y = startY
         while (y <= endY) {
             drawCircle(
                 color = dotColor,
-                radius = 1.5f,
+                radius = dotRadius,
                 center = Offset(x, y)
             )
-            y += gridSpacing
+            y += effectiveSpacing
         }
-        x += gridSpacing
+        x += effectiveSpacing
     }
 }
 

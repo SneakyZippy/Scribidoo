@@ -177,4 +177,42 @@ class CanvasMediaAndToolbarTest {
         state.nextPage()
         assertEquals(1, state.document.activePageIndex)
     }
+
+    @Test
+    fun testNewDocumentInitialization() {
+        val state = CanvasState()
+        val doc1 = DocumentModel()
+        state.loadDocument(doc1)
+        assertEquals(1, state.document.pages.size)
+        assertEquals(0, state.currentPage.strokes.size)
+        assertEquals(0, state.currentPage.images.size)
+        assertEquals(0, state.currentPage.audioNotes.size)
+
+        val doc2 = DocumentModel()
+        assertFalse("New documents must have distinct IDs", doc1.id == doc2.id)
+        state.loadDocument(doc2)
+        assertEquals(doc2.id, state.document.id)
+    }
+
+    @Test
+    fun testPortraitAndLandscapeImageAspectRatioPreservation() {
+        val state = CanvasState()
+        // Portrait image (e.g. 3:4 ratio, 450x600)
+        state.addImage(
+            localPath = "/data/local/portrait.jpg",
+            width = 450f,
+            height = 600f,
+            center = Offset(300f, 400f)
+        )
+        val portrait = state.currentPage.images.first()
+        assertEquals(450f, portrait.width, 0.01f)
+        assertEquals(600f, portrait.height, 0.01f)
+        assertTrue(portrait.keepAspectRatio)
+
+        // Resize portrait: scale to width 300, height must clamp to 300 * (600/450) = 400
+        state.resizeImage(portrait.id, 300f, 500f)
+        val resizedPortrait = state.currentPage.images.first()
+        assertEquals(300f, resizedPortrait.width, 0.01f)
+        assertEquals(400f, resizedPortrait.height, 0.01f)
+    }
 }

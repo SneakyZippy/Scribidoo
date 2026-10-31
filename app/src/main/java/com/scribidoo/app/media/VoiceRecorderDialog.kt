@@ -241,11 +241,14 @@ fun VoiceRecorderDialog(
                                     }
                                     isRecording = false
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFDC2626),
+                                    contentColor = Color.White
+                                )
                             ) {
-                                Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Stop, contentDescription = "Stop Recording", modifier = Modifier.size(20.dp), tint = Color.White)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Stop")
+                                Text("Stop Recording", fontWeight = FontWeight.Bold)
                             }
                         } else {
                             // Recorded! Show Preview Play / Re-record

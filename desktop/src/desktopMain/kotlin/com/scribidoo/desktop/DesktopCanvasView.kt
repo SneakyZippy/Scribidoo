@@ -462,7 +462,7 @@ fun DesktopCanvasView(
                         size = Size(curPage.width, curPage.height),
                         style = Stroke(width = 1.5f)
                     )
-                    drawPaperGuidelines(curPage.width, curPage.height)
+                    drawPaperGuidelines(curPage.width, curPage.height, state.viewportState.scale)
                 } else {
                     drawInfiniteGrid(state.viewportState)
                 }
@@ -713,7 +713,8 @@ private fun DrawScope.drawVectorShape(shape: ShapeModel) {
     }
 }
 
-private fun DrawScope.drawPaperGuidelines(pageWidth: Float, pageHeight: Float) {
+private fun DrawScope.drawPaperGuidelines(pageWidth: Float, pageHeight: Float, scale: Float) {
+    if (36f * scale < 4f) return
     val lineSpacing = 36f
     var y = 80f
     val lineColor = Color(0x18000000)
@@ -729,29 +730,34 @@ private fun DrawScope.drawPaperGuidelines(pageWidth: Float, pageHeight: Float) {
 }
 
 private fun DrawScope.drawInfiniteGrid(viewport: ViewportState) {
-    val gridSpacing = 40f
+    var effectiveSpacing = 40f
+    while (effectiveSpacing * viewport.scale < 24f) {
+        effectiveSpacing *= 2f
+    }
+
     val visibleLeft = viewport.screenToCanvas(Offset.Zero).x
     val visibleTop = viewport.screenToCanvas(Offset.Zero).y
     val visibleRight = viewport.screenToCanvas(Offset(viewport.containerSize.width, 0f)).x
     val visibleBottom = viewport.screenToCanvas(Offset(0f, viewport.containerSize.height)).y
 
-    val startX = (Math.floor((visibleLeft / gridSpacing).toDouble()) * gridSpacing).toFloat()
-    val endX = (Math.ceil((visibleRight / gridSpacing).toDouble()) * gridSpacing).toFloat()
-    val startY = (Math.floor((visibleTop / gridSpacing).toDouble()) * gridSpacing).toFloat()
-    val endY = (Math.ceil((visibleBottom / gridSpacing).toDouble()) * gridSpacing).toFloat()
+    val startX = (Math.floor((visibleLeft / effectiveSpacing).toDouble()) * effectiveSpacing).toFloat()
+    val endX = (Math.ceil((visibleRight / effectiveSpacing).toDouble()) * effectiveSpacing).toFloat()
+    val startY = (Math.floor((visibleTop / effectiveSpacing).toDouble()) * effectiveSpacing).toFloat()
+    val endY = (Math.ceil((visibleBottom / effectiveSpacing).toDouble()) * effectiveSpacing).toFloat()
 
     val dotColor = Color(0x309CA3AF)
+    val dotRadius = (1.5f / viewport.scale).coerceIn(1.2f, 4.0f)
     var x = startX
     while (x <= endX) {
         var y = startY
         while (y <= endY) {
             drawCircle(
                 color = dotColor,
-                radius = 1.5f,
+                radius = dotRadius,
                 center = Offset(x, y)
             )
-            y += gridSpacing
+            y += effectiveSpacing
         }
-        x += gridSpacing
+        x += effectiveSpacing
     }
 }

@@ -21,9 +21,11 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RangeSlider
@@ -146,10 +148,10 @@ fun AudioExtendedMenuDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    IconButton(
+                    FilledIconButton(
                         onClick = {
                             val file = File(audioNote.localPath)
-                            if (!file.exists()) return@IconButton
+                            if (!file.exists()) return@FilledIconButton
 
                             if (isPlaying) {
                                 mediaPlayer?.pause()
@@ -171,25 +173,28 @@ fun AudioExtendedMenuDialog(
                                 isPlaying = true
                             }
                         },
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        modifier = Modifier.size(48.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
-                            tint = Color.White
+                            contentDescription = if (isPlaying) "Pause" else "Play Trimmed Audio",
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
                     Column {
                         Text(
-                            text = "Playback Window: ${formatMs(trimRange.start)} - ${formatMs(trimRange.endInclusive)}",
+                            text = if (isPlaying) "Playing Trimmed Preview..." else "Play Trimmed Preview",
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Total recording length: ${formatMs(totalDurationMs)}",
+                            text = "Window: ${formatMs(trimRange.start)} - ${formatMs(trimRange.endInclusive)} (Total: ${formatMs(totalDurationMs)})",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
