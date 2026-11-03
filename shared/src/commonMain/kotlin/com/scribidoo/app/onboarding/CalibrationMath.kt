@@ -20,10 +20,6 @@ data class CalibrationResult(
 
 object CalibrationMath {
 
-    /**
-     * Analyzes touch samples for drawing and pinch-zooming, deriving tailored palm rejection
-     * thresholds with a tight, configurable safety buffer (default 1.25x / +25% buffer).
-     */
     fun calculateCalibration(
         tipSamples: List<TouchSample>,
         zoomSamples: List<TouchSample> = emptyList(),

@@ -16,5 +16,7 @@ data class PalmRejectionConfig(
     val constrainDrawingToPage: Boolean = false,
     val isShapeRecognitionEnabled: Boolean = true,
     val shapeHoldDurationMs: Long = 450L,
-    val hiddenTools: Set<String> = emptySet()
+    val hiddenTools: Set<String> = emptySet(),
+    val stylusBarrelAction: String = "ERASER",
+    val stylusPressureCurve: String = "LINEAR"
 )

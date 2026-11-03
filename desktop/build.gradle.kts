@@ -21,6 +21,12 @@ kotlin {
                 implementation(compose.foundation)
                 implementation(compose.ui)
                 implementation(libs.kotlinx.serialization.json)
+                implementation("org.apache.pdfbox:pdfbox:2.0.31")
+            }
+        }
+        val desktopTest by getting {
+            dependencies {
+                implementation(libs.junit)
             }
         }
     }
