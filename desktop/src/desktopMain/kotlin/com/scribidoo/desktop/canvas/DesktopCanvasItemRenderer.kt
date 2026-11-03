@@ -25,7 +25,6 @@ import com.scribidoo.app.canvas.model.TextBoxModel
 import com.scribidoo.app.canvas.state.SelectableType
 import com.scribidoo.app.canvas.state.SelectedItem
 import com.scribidoo.desktop.media.DesktopImageUtils
-import java.io.File
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -98,6 +97,42 @@ fun DrawScope.drawImages(
     }
 }
 
+fun DrawScope.drawDesktopTextBoxes(
+    textBoxes: List<TextBoxModel>,
+    isTextToolActive: Boolean,
+    selectedTextBoxId: String?,
+    textMeasurer: TextMeasurer
+) {
+    for (tb in textBoxes) {
+        val bounds = getDesktopTextBoxBounds(tb)
+        if (isTextToolActive && tb.id != selectedTextBoxId) {
+            drawRoundRect(
+                color = Color(0x12000000),
+                topLeft = Offset(bounds.left, bounds.top),
+                size = Size(bounds.width, bounds.height),
+                cornerRadius = CornerRadius(6f, 6f)
+            )
+            drawRoundRect(
+                color = Color(0x40000000),
+                topLeft = Offset(bounds.left, bounds.top),
+                size = Size(bounds.width, bounds.height),
+                cornerRadius = CornerRadius(6f, 6f),
+                style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f))
+            )
+        }
+        drawText(
+            textMeasurer = textMeasurer,
+            text = tb.text,
+            topLeft = Offset(tb.x, tb.y - tb.fontSizeSp * 2.2f),
+            style = TextStyle(
+                color = Color(tb.colorArgb),
+                fontSize = (tb.fontSizeSp * 1.8f).sp,
+                fontWeight = FontWeight.Medium
+            )
+        )
+    }
+}
+
 fun DrawScope.drawAudioNotes(
     audioNotes: List<AudioNoteModel>,
     playingAudioPath: String?,
@@ -123,7 +158,6 @@ fun DrawScope.drawAudioNotes(
             cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx)
         )
 
-        // Play / Pause Circle
         val playCenter = Offset(bounds.left + 26f, bounds.center.y)
         drawCircle(color = Color.White, radius = 13f, center = playCenter)
         if (isCurrentPlaying) {
@@ -139,7 +173,6 @@ fun DrawScope.drawAudioNotes(
             drawPath(path, Color(0xFF1E293B))
         }
 
-        // Title and Duration
         val titleText = audio.label.take(18)
         val mins = (audio.durationMs / 1000L) / 60L
         val secs = (audio.durationMs / 1000L) % 60L
@@ -176,7 +209,6 @@ fun DrawScope.drawDesktopSelectedItemOverlay(
         style = Stroke(width = 2.5f)
     )
 
-    // Corner Dots
     val dotRadius = 5f
     listOf(
         Offset(bounds.left, bounds.top),
@@ -187,12 +219,10 @@ fun DrawScope.drawDesktopSelectedItemOverlay(
         drawCircle(color = Color(0xFF2563EB), radius = dotRadius, center = pt, style = Stroke(width = 1.5f))
     }
 
-    // Bottom-Right Resize Handle
     val resizeCenter = Offset(bounds.right, bounds.bottom)
     drawCircle(color = Color(0xFF2563EB), radius = 10f, center = resizeCenter)
     drawCircle(color = Color.White, radius = 10f, center = resizeCenter, style = Stroke(width = 2f))
 
-    // Top action pills: [ Edit/Menu ] [ Delete ]
     val pillY = bounds.top - 28f
     val editLabel = if (item.type == SelectableType.TEXT_BOX) "Edit" else if (item.type == SelectableType.AUDIO_NOTE) "Trim" else "Info"
     drawRoundRect(color = Color(0xFF1E293B), topLeft = Offset(bounds.left, pillY), size = Size(50f, 22f), cornerRadius = CornerRadius(6f, 6f))

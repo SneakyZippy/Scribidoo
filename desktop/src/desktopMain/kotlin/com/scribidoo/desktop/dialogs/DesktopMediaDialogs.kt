@@ -46,6 +46,22 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
 
+fun openNativeImagePickerDialog(onImageSelected: (filePath: String) -> Unit) {
+    val dialog = FileDialog(null as Frame?, "Select Image File", FileDialog.LOAD)
+    dialog.setFilenameFilter { _, name ->
+        val lower = name.lowercase()
+        lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp")
+    }
+    dialog.isVisible = true
+    val selected = dialog.file?.let { File(dialog.directory, it) }
+    if (selected != null && selected.exists()) {
+        val localCopy = DesktopImageUtils.copyImageToLocalStorage(selected)
+        if (localCopy != null) {
+            onImageSelected(localCopy.absolutePath)
+        }
+    }
+}
+
 @Composable
 fun DesktopImagePickerDialog(
     onDismiss: () -> Unit,

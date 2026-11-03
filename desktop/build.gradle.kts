@@ -35,6 +35,9 @@ kotlin {
 compose.desktop {
     application {
         mainClass = "com.scribidoo.desktop.MainKt"
+        jvmArgs(
+            "-Dawt.touchKeyboardAutoShowIsEnabled=false"
+        )
         val customJdk = file("C:/Program Files/Java/jdk-23")
         if (customJdk.exists()) {
             javaHome = customJdk.absolutePath

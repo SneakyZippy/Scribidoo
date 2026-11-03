@@ -68,8 +68,8 @@ fun DesktopToolPalette(
     modifier: Modifier = Modifier
 ) {
     var orientation by remember { mutableStateOf(DesktopToolbarOrientation.HORIZONTAL) }
-    var offsetX by remember { mutableFloatStateOf(60f) }
-    var offsetY by remember { mutableFloatStateOf(40f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
 
     var showColorMenu by remember { mutableStateOf(false) }
     var showWidthMenu by remember { mutableStateOf(false) }
@@ -102,8 +102,11 @@ fun DesktopToolPalette(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Top drag handle
-                Box(modifier = Modifier.then(dragModifier).padding(bottom = 5.dp).width(48.dp).height(10.dp), contentAlignment = Alignment.Center) {
+                // Top drag handle with touch-friendly hit area
+                Box(
+                    modifier = Modifier.then(dragModifier).padding(bottom = 4.dp).width(72.dp).height(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Box(modifier = Modifier.width(42.dp).height(4.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f), RoundedCornerShape(2.dp)))
                 }
 
@@ -147,7 +150,11 @@ fun DesktopToolPalette(
                 // Status info
                 Row(modifier = Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Tool: ${state.currentTool.name}", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
-                    Text(if (state.palmConfig.isFingerDrawingEnabled) "Touch: ON" else "Stylus Only", fontSize = 10.sp, color = if (state.palmConfig.isFingerDrawingEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary)
+                    Text(
+                        if (state.palmConfig.isFingerDrawingEnabled) "Touch: ON" else "Stylus Only (Touch Pans)",
+                        fontSize = 10.sp,
+                        color = if (state.palmConfig.isFingerDrawingEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
+                    )
                     Text("Zoom: ${(state.viewportState.scale * 100).toInt()}%", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -157,7 +164,10 @@ fun DesktopToolPalette(
                 modifier = Modifier.padding(vertical = 6.dp, horizontal = 6.dp).width(92.dp).heightIn(max = 460.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(modifier = Modifier.then(dragModifier).padding(bottom = 6.dp).width(44.dp).height(12.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier.then(dragModifier).padding(bottom = 6.dp).width(64.dp).height(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Box(modifier = Modifier.width(36.dp).height(4.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f), RoundedCornerShape(2.dp)))
                 }
 

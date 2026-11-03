@@ -17,7 +17,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,42 +33,44 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
-import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.scribidoo.app.canvas.input.PalmRejectionConfig
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.model.DocumentModel
 import com.scribidoo.app.canvas.state.CanvasState
 import com.scribidoo.desktop.dialogs.DesktopCalibrationDialog
 import com.scribidoo.desktop.gallery.DesktopDocumentGalleryScreen
 import com.scribidoo.desktop.workspace.DesktopCanvasWorkspaceScreen
+import com.scribidoo.desktop.workspace.DesktopTouchInputFixer
 
-fun main() = application {
-    var activeDocument by remember { mutableStateOf<DocumentModel?>(null) }
-    val windowTitle = if (activeDocument != null) "Scribidoo - ${activeDocument!!.title}" else "Scribidoo - Notebooks Gallery"
+fun main() {
+    DesktopTouchInputFixer.initializeWindowsTouchSupport()
+    application {
+        var activeDocument by remember { mutableStateOf<DocumentModel?>(null) }
+        val windowTitle = if (activeDocument != null) "Scribidoo - ${activeDocument!!.title}" else "Scribidoo - Notebooks Gallery"
 
-    Window(
-        onCloseRequest = ::exitApplication,
-        title = windowTitle,
-        icon = painterResource("icon.png"),
-        state = rememberWindowState(width = 1280.dp, height = 800.dp)
-    ) {
-        MaterialTheme {
-            val currentDoc = activeDocument
-            if (currentDoc != null) {
-                DesktopCanvasWorkspaceScreen(
-                    initialDocument = currentDoc,
-                    window = window,
-                    onNavigateBack = { activeDocument = null },
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                DesktopDocumentGalleryScreen(
-                    window = window,
-                    onOpenDocument = { doc -> activeDocument = doc },
-                    modifier = Modifier.fillMaxSize()
-                )
+        Window(
+            onCloseRequest = ::exitApplication,
+            title = windowTitle,
+            icon = painterResource("icon.png"),
+            state = rememberWindowState(width = 1280.dp, height = 800.dp)
+        ) {
+            MaterialTheme {
+                val currentDoc = activeDocument
+                if (currentDoc != null) {
+                    DesktopCanvasWorkspaceScreen(
+                        initialDocument = currentDoc,
+                        window = window,
+                        onNavigateBack = { activeDocument = null },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    DesktopDocumentGalleryScreen(
+                        window = window,
+                        onOpenDocument = { doc -> activeDocument = doc },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }

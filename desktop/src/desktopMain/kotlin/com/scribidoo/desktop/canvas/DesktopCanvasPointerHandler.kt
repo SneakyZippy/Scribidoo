@@ -4,11 +4,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
-import androidx.compose.ui.input.pointer.isTertiaryPressed
 import com.scribidoo.app.canvas.model.DrawingTool
 import com.scribidoo.app.canvas.state.CanvasState
+import com.scribidoo.app.canvas.state.SelectableType
 import com.scribidoo.app.canvas.state.SelectedItem
 import com.scribidoo.desktop.media.DesktopAudioPlayer
 import kotlinx.coroutines.CoroutineScope
@@ -26,12 +27,10 @@ class DesktopCanvasPointerState(
     val activePointers = mutableMapOf<PointerId, Offset>()
     var previousFocalPoint: Offset? = null
     var previousSpan = 0f
-
     var isPanDragging = false
     var lastPanScreenPoint = Offset.Zero
     var isStylusErasing = false
     var isMultiTouchGesture = false
-
     var isMovingItem = false
     var isResizingItem = false
     var initialTouchCanvas = Offset.Zero
@@ -41,7 +40,6 @@ class DesktopCanvasPointerState(
     var initialFontSize = 16f
     var pendingTouchItem: SelectedItem? = null
     var longPressJob: Job? = null
-
     var shapeHoldJob: Job? = null
     var isAdjustingSnappedShape = false
     var lastHoldCheckCanvasPoint = Offset.Zero
@@ -54,57 +52,60 @@ class DesktopCanvasPointerState(
             PointerEventType.Press -> handlePress(event)
             PointerEventType.Move -> handleMove(event)
             PointerEventType.Release -> handleRelease(event)
+            else -> if (event.changes.none { it.pressed }) activePointers.clear()
         }
     }
 
-    private fun handlePress(event: PointerEvent) {
-        for (c in event.changes) {
-            if (c.pressed) activePointers[c.id] = c.position
-        }
+    private fun syncActivePointers(event: PointerEvent) {
+        activePointers.clear()
+        event.changes.forEach { if (it.pressed) activePointers[it.id] = it.position }
+    }
 
+    private fun handlePress(event: PointerEvent) {
+        syncActivePointers(event)
         DesktopCanvasGestureHandler.computeTwoPointerSpanAndFocal(activePointers)?.let { (focal, span) ->
-            previousFocalPoint = focal
-            previousSpan = span
-            isMultiTouchGesture = true
+            previousFocalPoint = focal; previousSpan = span; isMultiTouchGesture = true
             cancelInking()
             event.changes.forEach { it.consume() }
             return
         }
 
-        val change = event.changes.first()
+        val change = event.changes.firstOrNull { it.pressed } ?: event.changes.firstOrNull() ?: return
         val screenPoint = change.position
         val canvasPoint = state.viewportState.screenToCanvas(screenPoint)
+        if (handleNavigationOrStylusOnPress(event, change, screenPoint, canvasPoint)) return
+        if (handleItemOrLassoOnPress(change, screenPoint, canvasPoint)) return
 
-        val isHand = state.currentTool == DrawingTool.HAND
-        val isTouchPanOnly = change.type == PointerType.Touch && !state.palmConfig.isFingerDrawingEnabled
-        val isMousePan = change.type == PointerType.Mouse && (event.buttons.isSecondaryPressed || event.buttons.isTertiaryPressed)
+        val hitItem = DesktopCanvasItemHandler.findHitItem(state, canvasPoint)
+        startLongPressDetection(hitItem, canvasPoint)
+        shapeHoldJob?.cancel()
+        isAdjustingSnappedShape = false
+        lastHoldCheckCanvasPoint = canvasPoint
+        DesktopCanvasDrawingHandler.startDrawing(state, canvasPoint, change, hasHitItem = hitItem != null)
+        change.consume()
+    }
 
-        // Double-tap zoom/fit for touch & mouse (excluding digital stylus to avoid interfering with writing)
+    private fun handleNavigationOrStylusOnPress(
+        event: PointerEvent,
+        change: PointerInputChange,
+        screenPoint: Offset,
+        canvasPoint: Offset
+    ): Boolean {
         val now = System.currentTimeMillis()
-        val isDoubleTap = (now - lastTapTime < 320L) &&
-            hypot(screenPoint.x - lastTapPoint.x, screenPoint.y - lastTapPoint.y) < 32f &&
-            change.type != PointerType.Stylus && !isHand && !isMousePan
-
-        if (isDoubleTap) {
+        if (DesktopCanvasGestureHandler.isDoubleTapNavigationPress(event, change, state, now, lastTapTime, lastTapPoint)) {
             lastTapTime = 0L
-            if (state.viewportState.scale > 1.05f || state.viewportState.scale < 0.95f) {
-                state.viewportState.centerAndFit(state.currentPage.width, state.currentPage.height, 48f)
-            } else {
-                state.viewportState.zoomBy(1.4f, screenPoint)
-            }
+            DesktopCanvasGestureHandler.applyDoubleTapZoom(state.viewportState, state.currentPage.width, state.currentPage.height, screenPoint)
             cancelInking()
             change.consume()
-            return
+            return true
         }
-        lastTapTime = now
-        lastTapPoint = screenPoint
+        lastTapTime = now; lastTapPoint = screenPoint
 
-        if (isHand || isMousePan || isTouchPanOnly) {
-            isPanDragging = true
-            lastPanScreenPoint = screenPoint
+        if (DesktopCanvasGestureHandler.isPanNavigationPress(event, change, state)) {
             cancelInking()
+            isPanDragging = true; lastPanScreenPoint = screenPoint
             change.consume()
-            return
+            return true
         }
         isPanDragging = false
 
@@ -113,180 +114,178 @@ class DesktopCanvasPointerState(
             isStylusErasing = true
             state.eraseAt(canvasPoint, state.viewportState.screenToCanvasDist(36f))
             change.consume()
-            return
+            return true
         }
         isStylusErasing = false
-
         if (isBarrel && state.palmConfig.stylusBarrelAction == "LASSO") {
             state.startLasso(canvasPoint)
             change.consume()
-            return
+            return true
         }
+        return false
+    }
 
-        // Tap Audio Play Button or Selected Item Handles
-        if (DesktopCanvasItemHandler.handleSelectedItemPress(
-                state = state,
-                canvasPoint = canvasPoint,
-                audioPlayer = audioPlayer,
-                onStartResize = { bounds ->
-                    isResizingItem = true
-                    initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint
-                    initialItemWidth = bounds.width.coerceAtLeast(30f)
-                    initialItemHeight = bounds.height.coerceAtLeast(30f)
-                },
-                onStartMove = {
-                    isMovingItem = true
-                    initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint
+    private fun handleItemOrLassoOnPress(change: PointerInputChange, screenPoint: Offset, canvasPoint: Offset): Boolean {
+        val handledItem = DesktopCanvasItemHandler.handleSelectedItemPress(
+            state = state, canvasPoint = canvasPoint, audioPlayer = audioPlayer,
+            onStartResize = { bounds ->
+                isResizingItem = true; initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint
+                initialItemWidth = bounds.width.coerceAtLeast(30f); initialItemHeight = bounds.height.coerceAtLeast(30f)
+                val sel = state.selectedItem
+                if (sel?.type == SelectableType.TEXT_BOX) {
+                    initialFontSize = state.currentPage.textBoxes.firstOrNull { it.id == sel.id }?.fontSizeSp ?: 16f
                 }
-            )
-        ) {
-            change.consume()
-            return
-        }
+            },
+            onStartMove = { isMovingItem = true; initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint }
+        )
+        val handledLasso = !handledItem && DesktopCanvasItemHandler.handleLassoPress(
+            state = state, canvasPoint = canvasPoint, screenPoint = screenPoint, density = density,
+            onStartLassoDrag = { initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint },
+            onStartLassoScale = { initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint }
+        )
+        if (handledItem || handledLasso) change.consume()
+        return handledItem || handledLasso
+    }
 
-        // Lasso Tool interaction
-        if (DesktopCanvasItemHandler.handleLassoPress(
-                state = state,
-                canvasPoint = canvasPoint,
-                screenPoint = screenPoint,
-                density = density,
-                onStartLassoDrag = { initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint },
-                onStartLassoScale = { initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint }
-            )
-        ) {
-            change.consume()
-            return
+    private fun startLongPressDetection(hitItem: SelectedItem?, canvasPoint: Offset) {
+        longPressJob?.cancel()
+        pendingTouchItem = hitItem
+        if (hitItem == null) return
+        initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint
+        longPressJob = scope.launch {
+            delay(350)
+            if (state.activeStroke != null) state.cancelStroke()
+            if (state.activeShape != null) state.activeShape = null
+            state.selectedItem = hitItem
+            isMovingItem = true
         }
-
-        // Hit testing for 350ms instant lift-and-drag
-        val hitItem = DesktopCanvasItemHandler.findHitItem(state, canvasPoint)
-        if (hitItem != null) {
-            pendingTouchItem = hitItem
-            initialTouchCanvas = canvasPoint; lastTouchCanvas = canvasPoint
-            longPressJob?.cancel()
-            longPressJob = scope.launch {
-                delay(350)
-                state.selectedItem = hitItem
-                isMovingItem = true
-            }
-        } else {
-            pendingTouchItem = null
-            longPressJob?.cancel()
-        }
-
-        DesktopCanvasDrawingHandler.startDrawing(state, canvasPoint, change)
-        change.consume()
     }
 
     private fun handleMove(event: PointerEvent) {
-        for (c in event.changes) {
-            if (c.pressed) activePointers[c.id] = c.position
-            else activePointers.remove(c.id)
-        }
+        syncActivePointers(event)
+        if (activePointers.isEmpty()) return
 
-        DesktopCanvasGestureHandler.computeTwoPointerSpanAndFocal(activePointers)?.let { (currentFocal, currentSpan) ->
+        DesktopCanvasGestureHandler.computeTwoPointerSpanAndFocal(activePointers)?.let { (focal, span) ->
             isMultiTouchGesture = true
-            DesktopCanvasGestureHandler.applyTwoPointerTransform(
-                currentFocal = currentFocal,
-                currentSpan = currentSpan,
-                previousFocal = previousFocalPoint,
-                previousSpan = previousSpan,
-                viewportState = state.viewportState
-            )
-            previousFocalPoint = currentFocal
-            previousSpan = currentSpan
+            cancelInking()
+            DesktopCanvasGestureHandler.applyTwoPointerTransform(focal, span, previousFocalPoint, previousSpan, state.viewportState)
+            previousFocalPoint = focal; previousSpan = span
             event.changes.forEach { it.consume() }
             return
         }
-
         if (isMultiTouchGesture) {
             event.changes.forEach { it.consume() }
             return
         }
 
+        val change = event.changes.firstOrNull { it.pressed } ?: return
+        if (hypot(change.position.x - lastTapPoint.x, change.position.y - lastTapPoint.y) > 14f) {
+            lastTapTime = 0L
+            if (pendingTouchItem != null && !isMovingItem && !isResizingItem) {
+                longPressJob?.cancel(); pendingTouchItem = null
+            }
+        }
         if (isPanDragging) {
-            val change = event.changes.firstOrNull() ?: return
-            val delta = change.position - lastPanScreenPoint
+            state.viewportState.panBy(change.position - lastPanScreenPoint)
             lastPanScreenPoint = change.position
-            state.viewportState.panBy(delta)
             change.consume()
             return
         }
 
-        val change = event.changes.firstOrNull() ?: return
-        if (hypot(change.position.x - lastTapPoint.x, change.position.y - lastTapPoint.y) > 16f) {
-            lastTapTime = 0L
-        }
         val canvasPoint = state.viewportState.screenToCanvas(change.position)
+        if (handleStylusOrItemMove(event, change, canvasPoint)) return
 
+        DesktopCanvasDrawingHandler.continueDrawing(state, canvasPoint, change, isAdjustingSnappedShape)
+        scheduleShapeHoldCheck(canvasPoint)
+        change.consume()
+    }
+
+    private fun handleStylusOrItemMove(event: PointerEvent, change: PointerInputChange, canvasPoint: Offset): Boolean {
         val isBarrel = DesktopStylusHelper.isBarrelButtonPressed(change, event.buttons.isSecondaryPressed)
         if (isStylusErasing || change.type == PointerType.Eraser || (isBarrel && state.palmConfig.stylusBarrelAction == "ERASER")) {
             state.eraseAt(canvasPoint, state.viewportState.screenToCanvasDist(36f))
             change.consume()
-            return
+            return true
         }
-
         if (isBarrel && state.palmConfig.stylusBarrelAction == "LASSO") {
             state.appendLassoPoint(canvasPoint)
             change.consume()
-            return
+            return true
         }
-
-        if (DesktopCanvasItemHandler.handleItemDragOrTransform(
-                state = state,
-                canvasPoint = canvasPoint,
-                lastTouchCanvas = lastTouchCanvas,
-                isMovingItem = isMovingItem,
-                isResizingItem = isResizingItem,
-                initialItemWidth = initialItemWidth,
-                initialItemHeight = initialItemHeight,
-                initialFontSize = initialFontSize
-            )
-        ) {
+        val transformed = DesktopCanvasItemHandler.handleItemDragOrTransform(
+            state, canvasPoint, lastTouchCanvas, isMovingItem, isResizingItem,
+            initialItemWidth, initialItemHeight, initialFontSize
+        )
+        if (transformed) {
             lastTouchCanvas = canvasPoint
             change.consume()
-            return
         }
+        return transformed
+    }
 
-        DesktopCanvasDrawingHandler.continueDrawing(state, canvasPoint, change, isAdjustingSnappedShape)
-        change.consume()
+    private fun scheduleShapeHoldCheck(canvasPoint: Offset) {
+        val isInk = state.currentTool == DrawingTool.PEN || state.currentTool == DrawingTool.HIGHLIGHTER
+        if (!isInk || isAdjustingSnappedShape || !state.palmConfig.isShapeRecognitionEnabled) return
+        val dHold = canvasPoint - lastHoldCheckCanvasPoint
+        if (hypot(dHold.x, dHold.y) > state.viewportState.screenToCanvasDist(14f)) {
+            lastHoldCheckCanvasPoint = canvasPoint
+            shapeHoldJob?.cancel()
+            shapeHoldJob = scope.launch {
+                delay(state.palmConfig.shapeHoldDurationMs)
+                if (DesktopCanvasDrawingHandler.trySnapActiveStrokeToShape(state, canvasPoint)) {
+                    isAdjustingSnappedShape = true
+                }
+            }
+        }
     }
 
     private fun handleRelease(event: PointerEvent) {
-        for (c in event.changes) {
-            activePointers.remove(c.id)
-        }
-        if (activePointers.isEmpty()) {
-            isMultiTouchGesture = false
-        }
-        previousFocalPoint = null
-        previousSpan = 0f
-        isPanDragging = false
-        isStylusErasing = false
-        isMovingItem = false
-        isResizingItem = false
-        longPressJob?.cancel()
+        syncActivePointers(event)
+        longPressJob?.cancel(); shapeHoldJob?.cancel()
 
-        if (isAdjustingSnappedShape) {
-            isAdjustingSnappedShape = false
-            state.finishShape()
+        if (isMultiTouchGesture) {
+            if (activePointers.isEmpty()) {
+                isMultiTouchGesture = false; previousFocalPoint = null; previousSpan = 0f
+            }
+            event.changes.forEach { it.consume() }
+            return
         }
-        shapeHoldJob?.cancel()
+        if (isPanDragging || isStylusErasing || isAdjustingSnappedShape || isMovingItem || isResizingItem) {
+            finishSpecialInteractionOnRelease()
+            event.changes.forEach { it.consume() }
+            return
+        }
+        if (state.isDraggingLassoSelection || state.isScalingLassoSelection) {
+            state.isDraggingLassoSelection = false; state.isScalingLassoSelection = false
+            event.changes.forEach { it.consume() }
+            return
+        }
 
-        DesktopCanvasDrawingHandler.finishDrawing(state)
-        if (state.activeLassoPath.isNotEmpty() && state.currentTool != DrawingTool.LASSO) {
-            state.finishLasso()
+        val tappedItem = pendingTouchItem
+        pendingTouchItem = null
+        if (tappedItem?.type == SelectableType.TEXT_BOX && state.currentTool == DrawingTool.TEXT) {
+            state.activeTextBoxForEdit = state.currentPage.textBoxes.firstOrNull { it.id == tappedItem.id }
+        } else {
+            DesktopCanvasDrawingHandler.finishDrawing(state)
+            if (state.activeLassoPath.isNotEmpty() && state.currentTool != DrawingTool.LASSO) state.finishLasso()
         }
-        state.isDraggingLassoSelection = false
-        state.isScalingLassoSelection = false
         event.changes.forEach { it.consume() }
+    }
+
+    private fun finishSpecialInteractionOnRelease() {
+        isPanDragging = false
+        if (isStylusErasing) { isStylusErasing = false; state.finishErasing() }
+        if (isAdjustingSnappedShape) { isAdjustingSnappedShape = false; state.finishShape() }
+        if (isMovingItem || isResizingItem) {
+            isMovingItem = false; isResizingItem = false; pendingTouchItem = null
+            state.commitTransform()
+        }
     }
 
     private fun cancelInking() {
         if (state.activeStroke != null) state.cancelStroke()
         if (state.activeShape != null) state.activeShape = null
-        isPanDragging = false
-        isStylusErasing = false
-        longPressJob?.cancel()
+        isPanDragging = false; isStylusErasing = false
+        longPressJob?.cancel(); shapeHoldJob?.cancel()
     }
 }

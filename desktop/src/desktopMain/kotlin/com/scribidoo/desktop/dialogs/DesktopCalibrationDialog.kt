@@ -2,6 +2,7 @@ package com.scribidoo.desktop.dialogs
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -9,10 +10,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -137,6 +141,43 @@ fun DesktopCalibrationDialog(
                             onZoomScaleChange = { zoomScale = it },
                             onSampleCaptured = { capturedZoomSamples.add(it) }
                         )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledTonalButton(
+                                onClick = {
+                                    zoomScale = (zoomScale * 0.85f).coerceIn(0.5f, 2.5f)
+                                    capturedZoomSamples.add(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
+                                },
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(16.dp))
+                            }
+
+                            FilledTonalButton(
+                                onClick = {
+                                    zoomScale = 1.0f
+                                    capturedZoomSamples.add(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
+                                },
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Text("1.0x", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            FilledTonalButton(
+                                onClick = {
+                                    zoomScale = (zoomScale * 1.2f).coerceIn(0.5f, 2.5f)
+                                    capturedZoomSamples.add(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
+                                },
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Zoom In", modifier = Modifier.size(16.dp))
+                            }
+                        }
+
                         Text("On Windows laptops: zoom with trackpad pinch, double-tap, or the on-canvas zoom pill.", fontSize = 11.sp, color = Color.Gray)
                     }
 

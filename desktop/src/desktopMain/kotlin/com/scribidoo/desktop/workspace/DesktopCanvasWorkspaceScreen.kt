@@ -3,7 +3,9 @@ package com.scribidoo.desktop.workspace
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -30,12 +32,14 @@ import com.scribidoo.app.canvas.model.DocumentModel
 import com.scribidoo.app.canvas.state.CanvasState
 import com.scribidoo.desktop.DesktopCanvasView
 import com.scribidoo.desktop.DesktopExporter
-import com.scribidoo.desktop.DesktopToolPalette
 import com.scribidoo.desktop.data.DesktopDocumentStorageManager
+import com.scribidoo.desktop.dialogs.DesktopCalibrationDialog
+import com.scribidoo.desktop.dialogs.openNativeImagePickerDialog
 import com.scribidoo.desktop.media.DesktopAudioPlayer
 import com.scribidoo.desktop.media.DesktopAudioRecorder
 import com.scribidoo.desktop.pdf.DesktopPdfExporter
 import com.scribidoo.desktop.pdf.DesktopPdfManager
+import com.scribidoo.desktop.ui.DesktopRibbonToolbar
 import kotlinx.coroutines.delay
 import java.awt.Component
 import java.awt.FileDialog
@@ -57,11 +61,12 @@ fun DesktopCanvasWorkspaceScreen(
 
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showCalibrationDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var isDraggingOver by remember { mutableStateOf(false) }
 
-    val isInputActive = showSettingsDialog || showRenameDialog ||
+    val isInputActive = showSettingsDialog || showRenameDialog || showCalibrationDialog ||
         state.activeTextBoxForEdit != null || state.pendingTextInsertPoint != null ||
         state.showVoiceRecorderDialog || state.showImageSourceDialog
 
@@ -122,7 +127,7 @@ fun DesktopCanvasWorkspaceScreen(
         }
     }
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxSize()
             .focusRequester(focusRequester)
@@ -145,15 +150,8 @@ fun DesktopCanvasWorkspaceScreen(
                 } else Modifier
             )
     ) {
-        // 1. Edge-to-Edge Canvas
-        DesktopCanvasView(
-            state = state,
-            audioPlayer = audioPlayer,
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // 2. Compact Top-Left Workspace Capsule Header
-        DesktopWorkspaceHeader(
+        // 1. Docked Modern Top Ribbon Toolbar
+        DesktopRibbonToolbar(
             state = state,
             onNavigateBack = {
                 DesktopDocumentStorageManager.saveDocument(state.document)
@@ -167,6 +165,17 @@ fun DesktopCanvasWorkspaceScreen(
                 DesktopDocumentStorageManager.saveDocument(state.document)
                 toastMessage = "Saved '${state.document.title}'"
             },
+            onOpenImagePicker = {
+                openNativeImagePickerDialog { filePath ->
+                    val center = state.viewportState.screenToCanvas(
+                        androidx.compose.ui.geometry.Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
+                    )
+                    state.addImage(filePath, 360f, 270f, center)
+                    toastMessage = "Image added"
+                }
+            },
+            onOpenVoiceRecorder = { state.showVoiceRecorderDialog = true },
+            onOpenCalibration = { showCalibrationDialog = true },
             onExportPngCurrent = {
                 try {
                     val file = DesktopExporter.exportPageToPng(state.currentPage, state.document.title)
@@ -222,49 +231,58 @@ fun DesktopCanvasWorkspaceScreen(
                     toastMessage = "Imported '${imported.title}'"
                 }
             },
-            onOpenSettings = { showSettingsDialog = true },
-            modifier = Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 16.dp)
+            onOpenSettings = { showSettingsDialog = true }
         )
 
-        // 3. Floating Tool Palette
-        DesktopToolPalette(
-            state = state,
-            onOpenSettings = { showSettingsDialog = true },
-            onOpenImagePicker = { state.showImageSourceDialog = true },
-            onOpenVoiceRecorder = { state.showVoiceRecorderDialog = true },
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp)
-        )
+        // 2. Unobstructed Full Canvas Area
+        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            DesktopCanvasView(
+                state = state,
+                audioPlayer = audioPlayer,
+                modifier = Modifier.fillMaxSize()
+            )
 
-        // 4. Floating Zoom Pill (Touchscreen & Trackpad Quick Zoom)
-        DesktopZoomPill(
-            state = state,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 24.dp)
-        )
-
-        // 5. Toast Notification
-        toastMessage?.let { msg ->
-            LaunchedEffect(msg) {
-                delay(2500)
-                toastMessage = null
-            }
-            Surface(
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 18.dp).shadow(8.dp, RoundedCornerShape(14.dp)),
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.inverseSurface,
-                tonalElevation = 6.dp
-            ) {
-                Text(
-                    text = msg,
-                    color = MaterialTheme.colorScheme.inverseOnSurface,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
-                )
+            // Toast Notification
+            toastMessage?.let { msg ->
+                LaunchedEffect(msg) {
+                    delay(2500)
+                    toastMessage = null
+                }
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 20.dp)
+                        .shadow(8.dp, RoundedCornerShape(14.dp)),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    tonalElevation = 6.dp
+                ) {
+                    Text(
+                        text = msg,
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
+                    )
+                }
             }
         }
     }
 
-    // 5. Modular Workspace Dialogs
+    // 3. Calibration Dialog
+    if (showCalibrationDialog) {
+        DesktopCalibrationDialog(
+            initialConfig = state.palmConfig,
+            onDismiss = { showCalibrationDialog = false },
+            onComplete = { updated ->
+                state.palmConfig = updated
+                showCalibrationDialog = false
+                toastMessage = "Calibration settings applied"
+            }
+        )
+    }
+
+    // 4. Modular Workspace Dialogs
     DesktopWorkspaceDialogs(
         state = state,
         audioRecorder = audioRecorder,

@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.scribidoo.app.onboarding.TouchSample
+import kotlin.math.exp
 import kotlin.math.hypot
 
 @Composable
@@ -51,6 +53,11 @@ fun DesktopCalibrationDrawPad(
     onSampleCaptured: (TouchSample) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val updatedCurrentStroke by rememberUpdatedState(currentStroke)
+    val updatedOnStrokeChange by rememberUpdatedState(onCurrentStrokeChange)
+    val updatedOnStrokeFinished by rememberUpdatedState(onStrokeFinished)
+    val updatedOnSampleCaptured by rememberUpdatedState(onSampleCaptured)
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -67,16 +74,23 @@ fun DesktopCalibrationDrawPad(
 
                         when (event.type) {
                             PointerEventType.Press -> {
-                                onCurrentStrokeChange(listOf(pt))
-                                onSampleCaptured(TouchSample(pt.x, pt.y, 60f, 0.08f, change.pressure))
+                                updatedOnStrokeChange(listOf(pt))
+                                updatedOnSampleCaptured(TouchSample(pt.x, pt.y, 60f, 0.08f, change.pressure))
+                                change.consume()
                             }
                             PointerEventType.Move -> {
-                                onCurrentStrokeChange(currentStroke + pt)
-                                onSampleCaptured(TouchSample(pt.x, pt.y, 60f, 0.08f, change.pressure))
+                                if (change.pressed && updatedCurrentStroke.isNotEmpty()) {
+                                    updatedOnStrokeChange(updatedCurrentStroke + pt)
+                                    updatedOnSampleCaptured(TouchSample(pt.x, pt.y, 60f, 0.08f, change.pressure))
+                                    change.consume()
+                                }
                             }
                             PointerEventType.Release -> {
-                                onStrokeFinished(currentStroke)
-                                onCurrentStrokeChange(emptyList())
+                                if (updatedCurrentStroke.isNotEmpty()) {
+                                    updatedOnStrokeFinished(updatedCurrentStroke)
+                                    updatedOnStrokeChange(emptyList())
+                                    change.consume()
+                                }
                             }
                         }
                     }
@@ -92,6 +106,8 @@ fun DesktopCalibrationDrawPad(
                         for (i in 1 until s.size) lineTo(s[i].x, s[i].y)
                     }
                     drawPath(p, Color(0xFF2563EB), style = Stroke(5f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                } else if (s.size == 1) {
+                    drawCircle(Color(0xFF2563EB), radius = 3.5f, center = s.first())
                 }
             }
         }
@@ -109,6 +125,9 @@ fun DesktopCalibrationZoomPad(
     modifier: Modifier = Modifier
 ) {
     var lastTwoFingerSpan by remember { mutableFloatStateOf(0f) }
+    val currentZoomScale by rememberUpdatedState(zoomScale)
+    val updatedOnZoomChange by rememberUpdatedState(onZoomScaleChange)
+    val updatedOnSampleCaptured by rememberUpdatedState(onSampleCaptured)
 
     Box(
         modifier = modifier
@@ -123,16 +142,17 @@ fun DesktopCalibrationZoomPad(
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
+                        pointers.clear()
                         for (c in event.changes) {
-                            if (c.pressed) pointers[c.id] = c.position else pointers.remove(c.id)
+                            if (c.pressed) pointers[c.id] = c.position
                         }
                         if (pointers.size >= 2) {
                             val p = pointers.values.toList()
                             val span = hypot(p[1].x - p[0].x, p[1].y - p[0].y).coerceAtLeast(10f)
                             if (lastTwoFingerSpan > 0f) {
-                                val newScale = (zoomScale * (span / lastTwoFingerSpan)).coerceIn(0.5f, 2.5f)
-                                onZoomScaleChange(newScale)
-                                onSampleCaptured(TouchSample(p[0].x, p[0].y, 110f, 0.12f, 0.5f))
+                                val newScale = (currentZoomScale * (span / lastTwoFingerSpan)).coerceIn(0.5f, 2.5f)
+                                updatedOnZoomChange(newScale)
+                                updatedOnSampleCaptured(TouchSample(p[0].x, p[0].y, 110f, 0.12f, 0.5f))
                             }
                             lastTwoFingerSpan = span
                         } else {
@@ -140,16 +160,18 @@ fun DesktopCalibrationZoomPad(
                         }
                         if (event.type == PointerEventType.Scroll) {
                             val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-                            val factor = if (dy < 0) 1.15f else 0.87f
-                            val newScale = (zoomScale * factor).coerceIn(0.5f, 2.5f)
-                            onZoomScaleChange(newScale)
-                            onSampleCaptured(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
+                            if (dy != 0f) {
+                                val factor = exp(-dy * 0.035f).coerceIn(0.85f, 1.15f)
+                                val newScale = (currentZoomScale * factor).coerceIn(0.5f, 2.5f)
+                                updatedOnZoomChange(newScale)
+                                updatedOnSampleCaptured(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
+                            }
                         } else if (event.type == PointerEventType.Press) {
                             val now = System.currentTimeMillis()
                             if (now - lastTap < 320L) {
-                                val newScale = if (zoomScale > 1.1f) 1.0f else 1.5f
-                                onZoomScaleChange(newScale)
-                                onSampleCaptured(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
+                                val newScale = if (currentZoomScale > 1.1f) 1.0f else 1.5f
+                                updatedOnZoomChange(newScale)
+                                updatedOnSampleCaptured(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
                                 lastTap = 0L
                             } else lastTap = now
                         }
@@ -160,45 +182,16 @@ fun DesktopCalibrationZoomPad(
     ) {
         Box(
             modifier = Modifier
-                .size((56 * zoomScale).dp.coerceIn(32.dp, 110.dp))
+                .size((60 * zoomScale).dp.coerceIn(36.dp, 120.dp))
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primaryContainer)
                 .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.ZoomIn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Text(String.format("%.1fx", zoomScale), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Icon(Icons.Default.ZoomIn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                Text(String.format("%.1fx", zoomScale), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
-        }
-
-        Row(
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Button(
-                onClick = {
-                    onZoomScaleChange((zoomScale * 0.85f).coerceIn(0.5f, 2.5f))
-                    onSampleCaptured(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
-                },
-                modifier = Modifier.height(28.dp)
-            ) { Text("-", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
-
-            Button(
-                onClick = {
-                    onZoomScaleChange(1.0f)
-                    onSampleCaptured(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
-                },
-                modifier = Modifier.height(28.dp)
-            ) { Text("1.0x", fontSize = 11.sp) }
-
-            Button(
-                onClick = {
-                    onZoomScaleChange((zoomScale * 1.2f).coerceIn(0.5f, 2.5f))
-                    onSampleCaptured(TouchSample(100f, 100f, 110f, 0.12f, 0.5f))
-                },
-                modifier = Modifier.height(28.dp)
-            ) { Text("+", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
         }
     }
 }

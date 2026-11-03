@@ -57,6 +57,7 @@ class CanvasState(
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(4.0f)
     var palmConfig by mutableStateOf(PalmRejectionConfig())
+    var isSpacebarPanActive by mutableStateOf(false)
 
     // Active in-progress items
     var activeStroke by mutableStateOf<StrokeModel?>(null)

@@ -26,6 +26,20 @@ object DesktopKeyboardHandler {
         if (event.type != KeyEventType.KeyDown) return false
         if (isInputActive) return false
 
+        if (event.key == Key.Spacebar) {
+            return when (event.type) {
+                KeyEventType.KeyDown -> {
+                    state.isSpacebarPanActive = true
+                    true
+                }
+                KeyEventType.KeyUp -> {
+                    state.isSpacebarPanActive = false
+                    true
+                }
+                else -> false
+            }
+        }
+
         val isModifier = event.isCtrlPressed || event.isMetaPressed
         return if (isModifier) {
             handleModifierShortcuts(event, state, onSaveRequested, showToast)
@@ -81,7 +95,7 @@ object DesktopKeyboardHandler {
                     state.viewportState.containerSize.width / 2f,
                     state.viewportState.containerSize.height / 2f
                 )
-                state.viewportState.zoomBy(1.2f, center)
+                state.viewportState.zoomBy(1.10f, center)
                 true
             }
             Key.Minus, Key.NumPadSubtract -> {
@@ -89,7 +103,7 @@ object DesktopKeyboardHandler {
                     state.viewportState.containerSize.width / 2f,
                     state.viewportState.containerSize.height / 2f
                 )
-                state.viewportState.zoomBy(1f / 1.2f, center)
+                state.viewportState.zoomBy(1f / 1.10f, center)
                 true
             }
             Key.Zero, Key.NumPad0 -> {
@@ -118,7 +132,7 @@ object DesktopKeyboardHandler {
                 showToast("Pen")
                 true
             }
-            Key.Three, Key.H -> {
+            Key.Three, Key.H, Key.B -> {
                 state.currentTool = DrawingTool.HIGHLIGHTER
                 showToast("Highlighter")
                 true

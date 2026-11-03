@@ -50,7 +50,7 @@ fun DesktopZoomPill(
                         state.viewportState.containerSize.width / 2f,
                         state.viewportState.containerSize.height / 2f
                     )
-                    state.viewportState.zoomBy(0.85f, focal)
+                    state.viewportState.zoomBy(0.90f, focal)
                 },
                 modifier = Modifier.size(30.dp)
             ) {
@@ -79,7 +79,7 @@ fun DesktopZoomPill(
                         state.viewportState.containerSize.width / 2f,
                         state.viewportState.containerSize.height / 2f
                     )
-                    state.viewportState.zoomBy(1.2f, focal)
+                    state.viewportState.zoomBy(1.10f, focal)
                 },
                 modifier = Modifier.size(30.dp)
             ) {
