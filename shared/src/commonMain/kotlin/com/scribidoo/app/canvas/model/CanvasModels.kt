@@ -30,7 +30,9 @@ enum class ShapeType {
     LINE,
     ARROW,
     RECTANGLE,
-    ELLIPSE
+    ELLIPSE,
+    TRIANGLE,
+    RIGHT_ANGLE
 }
 
 @Serializable
@@ -81,7 +83,9 @@ data class ShapeModel(
     val endY: Float,
     val strokeColorArgb: Int,
     val strokeWidth: Float,
-    val fillColorArgb: Int? = null
+    val fillColorArgb: Int? = null,
+    val vertexX: Float? = null,
+    val vertexY: Float? = null
 )
 
 @Serializable
@@ -104,7 +108,9 @@ data class ImageModel(
     val y: Float,
     val width: Float = 400f,
     val height: Float = 300f,
-    val keepAspectRatio: Boolean = true
+    val keepAspectRatio: Boolean = true,
+    val rotationDegrees: Float = 0f,
+    val opacity: Float = 1.0f
 )
 
 @Serializable
@@ -113,6 +119,8 @@ data class AudioNoteModel(
     val localPath: String,
     val x: Float,
     val y: Float,
+    val width: Float = 140f,
+    val height: Float = 44f,
     val durationMs: Long = 0L,
     val trimStartMs: Long = 0L,
     val trimEndMs: Long = 0L,

@@ -128,6 +128,36 @@ object DesktopExporter {
                     canvas.drawLine(shape.endX, shape.endY, x1, y1, shapePaint)
                     canvas.drawLine(shape.endX, shape.endY, x2, y2, shapePaint)
                 }
+                ShapeType.TRIANGLE -> {
+                    val triPath = org.jetbrains.skia.Path().apply {
+                        if (shape.vertexX != null && shape.vertexY != null) {
+                            moveTo(shape.startX, shape.startY)
+                            lineTo(shape.vertexX, shape.vertexY)
+                            lineTo(shape.endX, shape.endY)
+                            closePath()
+                        } else {
+                            val l = minOf(shape.startX, shape.endX)
+                            val t = minOf(shape.startY, shape.endY)
+                            val r = maxOf(shape.startX, shape.endX)
+                            val b = maxOf(shape.startY, shape.endY)
+                            moveTo((l + r) / 2f, t)
+                            lineTo(r, b)
+                            lineTo(l, b)
+                            closePath()
+                        }
+                    }
+                    canvas.drawPath(triPath, shapePaint)
+                }
+                ShapeType.RIGHT_ANGLE -> {
+                    val vx = shape.vertexX ?: shape.startX
+                    val vy = shape.vertexY ?: shape.endY
+                    val anglePath = org.jetbrains.skia.Path().apply {
+                        moveTo(shape.startX, shape.startY)
+                        lineTo(vx, vy)
+                        lineTo(shape.endX, shape.endY)
+                    }
+                    canvas.drawPath(anglePath, shapePaint)
+                }
             }
         }
 

@@ -86,13 +86,26 @@ fun DocumentGalleryScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val storageManager = remember { DocumentStorageManager(context) }
+    val prefManager = remember { com.scribidoo.app.preference.UserPreferencesManager(context) }
 
     var documents by remember { mutableStateOf<List<DocumentModel>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var showRenameDialogFor by remember { mutableStateOf<DocumentModel?>(null) }
     var renameInput by remember { mutableStateOf("") }
     var showDeleteConfirmFor by remember { mutableStateOf<DocumentModel?>(null) }
-    var showBrandShowcaseDialog by remember { mutableStateOf(false) }
+    var showCalibrationDialog by remember { mutableStateOf(!prefManager.hasCompletedOnboarding) }
+
+    if (showCalibrationDialog) {
+        com.scribidoo.app.onboarding.OnboardingCalibrationDialog(
+            initialConfig = prefManager.loadPalmConfig(),
+            onDismiss = { showCalibrationDialog = false },
+            onComplete = { newConfig ->
+                prefManager.savePalmConfig(newConfig)
+                prefManager.hasCompletedOnboarding = true
+                showCalibrationDialog = false
+            }
+        )
+    }
 
     fun refreshList() {
         coroutineScope.launch {
@@ -136,45 +149,37 @@ fun DocumentGalleryScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Watercolor Logo & Title Lockup
+                        // App Title & Count
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { showBrandShowcaseDialog = true }
-                                .padding(vertical = 4.dp, horizontal = 4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(vertical = 4.dp)
                         ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.scribidoo_brand_icon),
-                                contentDescription = "Scribidoo Monogram",
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .shadow(2.dp, CircleShape),
-                                contentScale = ContentScale.Fit
+                            Text(
+                                text = "Scribidoo",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            Column {
-                                Image(
-                                    painter = painterResource(id = R.drawable.scribidoo_logotype),
-                                    contentDescription = "Scribidoo",
-                                    modifier = Modifier.height(28.dp),
-                                    contentScale = ContentScale.Fit
-                                )
-                                Text(
-                                    text = if (documents.isEmpty()) "Notebooks Gallery" else "${documents.size} Notebooks",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Text(
+                                text = if (documents.isEmpty()) "Notebooks" else "${documents.size} Notebooks",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .background(
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
                         }
 
                         // Right header action buttons
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { showBrandShowcaseDialog = true }) {
+                            IconButton(onClick = { showCalibrationDialog = true }) {
                                 Icon(
-                                    imageVector = Icons.Default.Info,
-                                    contentDescription = "Brand Identity Showcase",
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "Calibrate Input & Palm",
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                             }
@@ -218,17 +223,20 @@ fun DocumentGalleryScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.padding(32.dp)
                     ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.scribidoo_logo_watercolor),
-                            contentDescription = "Scribidoo Brand Mark",
-                            modifier = Modifier
-                                .size(180.dp)
-                                .shadow(6.dp, RoundedCornerShape(24.dp))
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(Color(0xFFFEFAF7))
-                                .padding(12.dp),
-                            contentScale = ContentScale.Fit
-                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                            modifier = Modifier.size(72.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Description,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(36.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
 
                         Text(
                             text = if (searchQuery.isNotBlank()) "No notes match '$searchQuery'" else "Welcome to Scribidoo",
@@ -278,9 +286,13 @@ fun DocumentGalleryScreen(
                             },
                             onDuplicate = {
                                 coroutineScope.launch {
+                                    val copyTitle = com.scribidoo.app.util.UniqueNamingUtils.generateDuplicateDocumentTitle(
+                                        doc.title,
+                                        documents.map { it.title }
+                                    )
                                     val copy = doc.copy(
                                         id = UUID.randomUUID().toString(),
-                                        title = "${doc.title} (Copy)",
+                                        title = copyTitle,
                                         createdAt = System.currentTimeMillis(),
                                         modifiedAt = System.currentTimeMillis()
                                     )
@@ -381,85 +393,6 @@ fun DocumentGalleryScreen(
             )
         }
 
-        // Brand Showcase Dialog
-        if (showBrandShowcaseDialog) {
-            AlertDialog(
-                onDismissRequest = { showBrandShowcaseDialog = false },
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text("Scribidoo Identity", fontWeight = FontWeight.Bold)
-                    }
-                },
-                text = {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.scribidoo_logo_watercolor),
-                            contentDescription = "Watercolor Brand Mark",
-                            modifier = Modifier
-                                .size(160.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFFFEFAF7))
-                                .padding(10.dp),
-                            contentScale = ContentScale.Fit
-                        )
-
-                        Text(
-                            text = "Scribidoo",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        Text(
-                            text = "Crafted for low-latency active stylus inking & multi-touch gestures on Android and Windows Touch devices.",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        HorizontalDivider()
-
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceAround,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.scribidoo_brand_icon),
-                                    contentDescription = "Brand Icon",
-                                    modifier = Modifier.size(54.dp),
-                                    contentScale = ContentScale.Fit
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("01. Brand Icon", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                            }
-
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.scribidoo_logotype),
-                                    contentDescription = "Logotype",
-                                    modifier = Modifier
-                                        .height(54.dp)
-                                        .width(120.dp),
-                                    contentScale = ContentScale.Fit
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("02. Script Logotype", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showBrandShowcaseDialog = false }) {
-                        Text("Close")
-                    }
-                }
-            )
-        }
     }
 }
 

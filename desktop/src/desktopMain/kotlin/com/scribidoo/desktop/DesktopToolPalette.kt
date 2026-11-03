@@ -148,6 +148,7 @@ fun DesktopToolPalette(
                     PenTool(state)
                     HighlighterTool(state)
                     EraserTool(state)
+                    LassoTool(state)
                     ShapeTool(
                         state = state,
                         showShapeMenu = showShapeMenu,
@@ -274,7 +275,11 @@ fun DesktopToolPalette(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        LassoTool(state)
                         ShapeTool(state, showShapeMenu, onShowShapeMenuChange = { showShapeMenu = it })
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextTool(state)
                     }
 
@@ -415,6 +420,27 @@ private fun EraserTool(state: CanvasState) {
 }
 
 @Composable
+private fun LassoTool(state: CanvasState) {
+    val isActive = state.currentTool == DrawingTool.LASSO
+    IconButton(
+        onClick = { state.currentTool = DrawingTool.LASSO },
+        modifier = Modifier
+            .size(36.dp)
+            .background(
+                if (isActive) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+    ) {
+        Icon(
+            painter = rememberVectorPainter(CanvasIcons.LassoTool),
+            contentDescription = "Lasso Selection",
+            modifier = Modifier.size(20.dp),
+            tint = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
 private fun ShapeTool(
     state: CanvasState,
     showShapeMenu: Boolean,
@@ -453,6 +479,16 @@ private fun ShapeTool(
             })
             DropdownMenuItem(text = { Text("Arrow") }, onClick = {
                 state.currentShapeType = ShapeType.ARROW
+                state.currentTool = DrawingTool.SHAPE
+                onShowShapeMenuChange(false)
+            })
+            DropdownMenuItem(text = { Text("Triangle") }, onClick = {
+                state.currentShapeType = ShapeType.TRIANGLE
+                state.currentTool = DrawingTool.SHAPE
+                onShowShapeMenuChange(false)
+            })
+            DropdownMenuItem(text = { Text("Right Angle (90°)") }, onClick = {
+                state.currentShapeType = ShapeType.RIGHT_ANGLE
                 state.currentTool = DrawingTool.SHAPE
                 onShowShapeMenuChange(false)
             })

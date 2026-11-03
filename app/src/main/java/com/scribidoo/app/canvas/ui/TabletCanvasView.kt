@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -50,6 +51,7 @@ import com.scribidoo.app.canvas.model.DrawingTool
 import com.scribidoo.app.canvas.model.ImageModel
 import com.scribidoo.app.canvas.model.PageModel
 import com.scribidoo.app.canvas.model.ShapeModel
+import com.scribidoo.app.canvas.shape.ShapeRecognitionEngine
 import com.scribidoo.app.canvas.model.TextBoxModel
 import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.model.StrokeModel
@@ -71,6 +73,7 @@ fun TabletCanvasView(
 ) {
     val view = LocalView.current
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current.density
 
     val inputClassifier = remember(state.palmConfig) {
         InputClassifier(state.palmConfig)
@@ -95,9 +98,13 @@ fun TabletCanvasView(
     var isMovingItem by remember { mutableStateOf(false) }
     var isLiftingAndDragging by remember { mutableStateOf(false) }
     var isResizingItem by remember { mutableStateOf(false) }
+    var isRotatingItem by remember { mutableStateOf(false) }
     var isMarginPanning by remember { mutableStateOf(false) }
 
     var longPressJob by remember { mutableStateOf<Job?>(null) }
+    var shapeHoldJob by remember { mutableStateOf<Job?>(null) }
+    var isAdjustingSnappedShape by remember { mutableStateOf(false) }
+    var lastHoldCheckCanvasPoint by remember { mutableStateOf(Offset.Zero) }
     var pendingTouchItem by remember { mutableStateOf<SelectedItem?>(null) }
     var pendingAudioPlay by remember { mutableStateOf<AudioNoteModel?>(null) }
     val strokePathCache = remember { mutableMapOf<String, androidx.compose.ui.graphics.Path>() }
@@ -106,6 +113,8 @@ fun TabletCanvasView(
     var initialItemWidth by remember { mutableFloatStateOf(100f) }
     var initialItemHeight by remember { mutableFloatStateOf(100f) }
     var initialFontSize by remember { mutableFloatStateOf(16f) }
+    var initialRotationAngle by remember { mutableFloatStateOf(0f) }
+    var initialImageRotation by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = modifier
@@ -132,6 +141,10 @@ fun TabletCanvasView(
                         isMovingItem = false
                         isLiftingAndDragging = false
                         isResizingItem = false
+                        isRotatingItem = false
+                        shapeHoldJob?.cancel()
+                        shapeHoldJob = null
+                        isAdjustingSnappedShape = false
 
                         // Palm check on initial touch down:
                         if (isPalm(0)) {
@@ -156,9 +169,14 @@ fun TabletCanvasView(
                         if (curSel != null) {
                             val bounds = getSelectedItemBounds(curSel, state.currentPage)
                             if (bounds != null) {
+                                val selImg = if (curSel.type == SelectableType.IMAGE) state.currentPage.images.firstOrNull { it.id == curSel.id } else null
+                                val rotDeg = selImg?.rotationDegrees ?: 0f
+                                val selCenter = Offset(bounds.left + bounds.width / 2f, bounds.top + bounds.height / 2f)
+                                val testPoint = if (rotDeg != 0f) rotatePoint(canvasPoint, selCenter, -rotDeg) else canvasPoint
+
                                 val resizeCenter = Offset(bounds.right, bounds.bottom)
                                 val handleTouchDist = state.viewportState.screenToCanvasDist(36f)
-                                val dResize = canvasPoint - resizeCenter
+                                val dResize = testPoint - resizeCenter
 
                                 // A. Bottom-right Resize Handle
                                 if (hypot(dResize.x, dResize.y) <= handleTouchDist) {
@@ -174,40 +192,62 @@ fun TabletCanvasView(
                                     return@pointerInteropFilter true
                                 }
 
-                                val pillY = bounds.top - 28f
-                                val hasActionPill = curSel.type != SelectableType.SHAPE
-                                val delLeft = if (hasActionPill) bounds.left + 86f else bounds.left
-
-                                // B. Delete button
-                                val delRect = Rect(delLeft, pillY - 4f, delLeft + 54f, pillY + 24f)
-                                if (delRect.contains(canvasPoint)) {
-                                    state.deleteSelectedItem()
-                                    return@pointerInteropFilter true
-                                }
-
-                                // C. Action button (Edit Text / Aspect Ratio / Audio Options)
-                                if (hasActionPill) {
-                                    val actionRect = Rect(bounds.left, pillY - 4f, bounds.left + 80f, pillY + 24f)
-                                    if (actionRect.contains(canvasPoint)) {
-                                        when (curSel.type) {
-                                            SelectableType.TEXT_BOX -> {
-                                                state.activeTextBoxForEdit = state.currentPage.textBoxes.firstOrNull { it.id == curSel.id }
-                                                state.selectedItem = null
-                                            }
-                                            SelectableType.IMAGE -> {
-                                                state.toggleImageAspectRatio(curSel.id)
-                                            }
-                                            SelectableType.AUDIO_NOTE -> {
-                                                state.activeAudioForMenu = state.currentPage.audioNotes.firstOrNull { it.id == curSel.id }
-                                            }
-                                            SelectableType.SHAPE -> {}
-                                        }
+                                // B. Top Rotation Handle for Images
+                                if (curSel.type == SelectableType.IMAGE) {
+                                    val invScale = 1f / state.viewportState.scale.coerceIn(0.15f, 4f)
+                                    val rotHandleCenter = Offset(selCenter.x, bounds.top - 28f * invScale)
+                                    val dRot = testPoint - rotHandleCenter
+                                    if (hypot(dRot.x, dRot.y) <= handleTouchDist) {
+                                        isRotatingItem = true
+                                        initialRotationAngle = Math.toDegrees(kotlin.math.atan2((canvasPoint.y - selCenter.y).toDouble(), (canvasPoint.x - selCenter.x).toDouble())).toFloat()
+                                        initialImageRotation = rotDeg
                                         return@pointerInteropFilter true
                                     }
                                 }
 
-                                // D. Inside bounds -> Move
-                                if (bounds.contains(canvasPoint)) {
+                                val toolbarBounds = calculateItemFloatingToolbarBounds(curSel, state.currentPage, state.viewportState.scale)
+                                val hitPad = state.viewportState.screenToCanvasDist(12f)
+                                fun Rect.hitTest(pt: Offset): Boolean =
+                                    pt.x in (left - hitPad)..(right + hitPad) && pt.y in (top - hitPad)..(bottom + hitPad)
+
+                                // C. Action button (Edit Text / Aspect Ratio / Audio Options)
+                                if (toolbarBounds?.actionBtnRect != null && toolbarBounds.actionBtnRect.hitTest(canvasPoint)) {
+                                    when (curSel.type) {
+                                        SelectableType.TEXT_BOX -> {
+                                            state.activeTextBoxForEdit = state.currentPage.textBoxes.firstOrNull { it.id == curSel.id }
+                                            state.selectedItem = null
+                                        }
+                                        SelectableType.IMAGE -> {
+                                            state.toggleImageAspectRatio(curSel.id)
+                                        }
+                                        SelectableType.AUDIO_NOTE -> {
+                                            state.activeAudioForMenu = state.currentPage.audioNotes.firstOrNull { it.id == curSel.id }
+                                        }
+                                        SelectableType.SHAPE -> {}
+                                    }
+                                    return@pointerInteropFilter true
+                                }
+
+                                // D. Rotate 90° button for Images
+                                if (toolbarBounds?.rot90BtnRect != null && toolbarBounds.rot90BtnRect.hitTest(canvasPoint)) {
+                                    state.rotateImageBy(curSel.id, 90f)
+                                    return@pointerInteropFilter true
+                                }
+
+                                // E. Opacity toggle button for Images
+                                if (toolbarBounds?.opacityBtnRect != null && toolbarBounds.opacityBtnRect.hitTest(canvasPoint)) {
+                                    state.cycleImageOpacity(curSel.id)
+                                    return@pointerInteropFilter true
+                                }
+
+                                // F. Delete button
+                                if (toolbarBounds != null && toolbarBounds.deleteBtnRect.hitTest(canvasPoint)) {
+                                    state.deleteSelectedItem()
+                                    return@pointerInteropFilter true
+                                }
+
+                                // F. Inside bounds -> Move
+                                if (bounds.contains(testPoint)) {
                                     isMovingItem = true
                                     lastTouchCanvas = canvasPoint
                                     initialTouchCanvas = canvasPoint
@@ -219,9 +259,36 @@ fun TabletCanvasView(
                             }
                         }
 
+                        // 2b. Check if interacting with an active Lasso Selection
+                        if (state.currentTool == DrawingTool.LASSO && state.lassoSelection.isNotEmpty) {
+                            val lassoBounds = state.lassoSelection.bounds
+                            if (isInsideLassoMenu(screenPoint, lassoBounds, state.viewportState, density)) {
+                                return@pointerInteropFilter false
+                            }
+                            if (isInsideLassoScaleHandle(canvasPoint, lassoBounds, state.viewportState.scale)) {
+                                state.isScalingLassoSelection = true
+                                state.pushHistory()
+                                lastTouchCanvas = canvasPoint
+                                initialTouchCanvas = canvasPoint
+                                activeDrawingPointerId = motionEvent.getPointerId(0)
+                                return@pointerInteropFilter true
+                            } else if (lassoBounds.contains(canvasPoint)) {
+                                state.isDraggingLassoSelection = true
+                                state.pushHistory()
+                                lastTouchCanvas = canvasPoint
+                                initialTouchCanvas = canvasPoint
+                                activeDrawingPointerId = motionEvent.getPointerId(0)
+                                return@pointerInteropFilter true
+                            } else {
+                                state.clearLasso()
+                            }
+                        }
+
                         // 3. Check if tapping an Audio Note PLAY button directly (held for ACTION_UP so long-press doesn't play)
                         val hitAudioPlay = state.currentPage.audioNotes.lastOrNull { audio ->
-                            val playCenter = Offset(audio.x + 44f, audio.y)
+                            val bounds = getAudioNoteBounds(audio)
+                            val playBtnRadius = (bounds.height * 0.32f).coerceIn(10f, 24f)
+                            val playCenter = Offset(bounds.right - playBtnRadius - 8f, audio.y)
                             val touchDist = state.viewportState.screenToCanvasDist(26f)
                             hypot(canvasPoint.x - playCenter.x, canvasPoint.y - playCenter.y) <= touchDist
                         }
@@ -230,7 +297,7 @@ fun TabletCanvasView(
                         // 4. Hit Testing for LONG-PRESS (Instant Lift & Drag)
                         val hitAudio = state.currentPage.audioNotes.lastOrNull { getAudioNoteBounds(it).contains(canvasPoint) }
                         val hitText = if (hitAudio == null) state.currentPage.textBoxes.lastOrNull { getTextBoxBounds(it).contains(canvasPoint) } else null
-                        val hitImage = if (hitAudio == null && hitText == null) state.currentPage.images.lastOrNull { getImageBounds(it).contains(canvasPoint) } else null
+                        val hitImage = if (hitAudio == null && hitText == null) state.currentPage.images.lastOrNull { isPointInImage(it, canvasPoint) } else null
                         val hitShape = if (hitAudio == null && hitText == null && hitImage == null) state.currentPage.shapes.lastOrNull { getShapeBounds(it).contains(canvasPoint) } else null
 
                         val hitItem = when {
@@ -290,6 +357,9 @@ fun TabletCanvasView(
                                         state.pendingTextInsertPoint = canvasPoint
                                     }
                                 }
+                                DrawingTool.LASSO -> {
+                                    state.startLasso(canvasPoint)
+                                }
                                 else -> {}
                             }
                         }
@@ -335,6 +405,7 @@ fun TabletCanvasView(
                                                 state.eraseAt(canvasPoint, eraserRadius)
                                             }
                                             DrawingTool.SHAPE -> state.startShape(canvasPoint)
+                                            DrawingTool.LASSO -> state.startLasso(canvasPoint)
                                             else -> {}
                                         }
                                     }
@@ -377,6 +448,45 @@ fun TabletCanvasView(
                             return@pointerInteropFilter true
                         }
 
+                        // Handle Lasso selection move or scale
+                        if (state.isScalingLassoSelection) {
+                            val bounds = state.lassoSelection.bounds
+                            val pivot = bounds.topLeft
+                            val prevDistX = lastTouchCanvas.x - pivot.x
+                            val curDistX = canvasPoint.x - pivot.x
+                            if (prevDistX > 10f && curDistX > 10f) {
+                                val factor = curDistX / prevDistX
+                                state.scaleLassoSelection(factor, pivot)
+                            }
+                            lastTouchCanvas = canvasPoint
+                            return@pointerInteropFilter true
+                        }
+                        if (state.isDraggingLassoSelection) {
+                            val delta = canvasPoint - lastTouchCanvas
+                            lastTouchCanvas = canvasPoint
+                            state.moveLassoSelection(delta.x, delta.y)
+                            return@pointerInteropFilter true
+                        }
+
+                        // Handle rotating selected image
+                        if (isRotatingItem && state.selectedItem != null) {
+                            val item = state.selectedItem!!
+                            if (item.type == SelectableType.IMAGE) {
+                                val img = state.currentPage.images.firstOrNull { it.id == item.id }
+                                if (img != null) {
+                                    val center = Offset(img.x + img.width / 2f, img.y + img.height / 2f)
+                                    val curAngle = Math.toDegrees(kotlin.math.atan2((canvasPoint.y - center.y).toDouble(), (canvasPoint.x - center.x).toDouble())).toFloat()
+                                    val delta = curAngle - initialRotationAngle
+                                    var newRot = (initialImageRotation + delta % 360f + 360f) % 360f
+                                    listOf(0f, 90f, 180f, 270f, 360f).forEach { snap ->
+                                        if (kotlin.math.abs(newRot - snap) < 4f) newRot = snap % 360f
+                                    }
+                                    state.rotateImage(img.id, newRot)
+                                }
+                            }
+                            return@pointerInteropFilter true
+                        }
+
                         // Handle resizing selected item
                         if (isResizingItem && state.selectedItem != null) {
                             val item = state.selectedItem!!
@@ -396,7 +506,11 @@ fun TabletCanvasView(
                                 SelectableType.SHAPE -> {
                                     state.resizeShape(item.id, canvasPoint.x, canvasPoint.y)
                                 }
-                                SelectableType.AUDIO_NOTE -> {}
+                                SelectableType.AUDIO_NOTE -> {
+                                    val newW = (initialItemWidth + deltaX * 2f).coerceIn(100f, 600f)
+                                    val newH = (initialItemHeight + deltaY * 2f).coerceIn(36f, 160f)
+                                    state.resizeAudioNote(item.id, newW, newH)
+                                }
                             }
                             return@pointerInteropFilter true
                         }
@@ -438,7 +552,44 @@ fun TabletCanvasView(
                                         when (state.currentTool) {
                                             DrawingTool.PEN,
                                             DrawingTool.HIGHLIGHTER -> {
-                                                state.appendStrokePoint(canvasPoint, pressure)
+                                                if (isAdjustingSnappedShape) {
+                                                    if (state.adjustSnappedShape(canvasPoint)) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                    }
+                                                } else {
+                                                    state.appendStrokePoint(canvasPoint, pressure)
+                                                    if (state.palmConfig.isShapeRecognitionEnabled) {
+                                                        val dHold = canvasPoint - lastHoldCheckCanvasPoint
+                                                        val distHold = hypot(dHold.x, dHold.y)
+                                                        if (distHold > state.viewportState.screenToCanvasDist(14f)) {
+                                                            lastHoldCheckCanvasPoint = canvasPoint
+                                                            shapeHoldJob?.cancel()
+                                                            shapeHoldJob = coroutineScope.launch {
+                                                                delay(state.palmConfig.shapeHoldDurationMs)
+                                                                val stroke = state.activeStroke
+                                                                if (stroke != null && stroke.points.size >= 8) {
+                                                                    val recognized = ShapeRecognitionEngine.recognize(stroke.points)
+                                                                    if (recognized != null) {
+                                                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                                        val shape = ShapeModel(
+                                                                            type = recognized.type,
+                                                                            startX = recognized.startX,
+                                                                            startY = recognized.startY,
+                                                                            endX = recognized.endX,
+                                                                            endY = recognized.endY,
+                                                                            vertexX = recognized.vertexX,
+                                                                            vertexY = recognized.vertexY,
+                                                                            strokeColorArgb = stroke.colorArgb,
+                                                                            strokeWidth = stroke.strokeWidth
+                                                                        )
+                                                                        state.snapStrokeToShape(shape, holdOrigin = canvasPoint)
+                                                                        isAdjustingSnappedShape = true
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                             DrawingTool.STROKE_ERASER,
                                             DrawingTool.SEGMENT_ERASER -> {
@@ -446,7 +597,12 @@ fun TabletCanvasView(
                                                 state.eraseAt(canvasPoint, eraserRadius)
                                             }
                                             DrawingTool.SHAPE -> {
-                                                state.updateShape(canvasPoint)
+                                                if (state.updateShape(canvasPoint)) {
+                                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                }
+                                            }
+                                            DrawingTool.LASSO -> {
+                                                state.appendLassoPoint(canvasPoint)
                                             }
                                             else -> {}
                                         }
@@ -468,6 +624,16 @@ fun TabletCanvasView(
                             viewportPointer1Id = null
                         }
 
+                        shapeHoldJob?.cancel()
+                        shapeHoldJob = null
+
+                        if (isAdjustingSnappedShape) {
+                            isAdjustingSnappedShape = false
+                            state.finishShape()
+                            activeDrawingPointerId = null
+                            return@pointerInteropFilter true
+                        }
+
                         if (liftedId == activeDrawingPointerId) {
                             when (state.currentTool) {
                                 DrawingTool.PEN,
@@ -475,6 +641,7 @@ fun TabletCanvasView(
                                 DrawingTool.STROKE_ERASER,
                                 DrawingTool.SEGMENT_ERASER -> state.finishErasing()
                                 DrawingTool.SHAPE -> state.finishShape()
+                                DrawingTool.LASSO -> state.finishLasso()
                                 else -> {}
                             }
                             activeDrawingPointerId = null
@@ -491,12 +658,19 @@ fun TabletCanvasView(
                             return@pointerInteropFilter true
                         }
 
-                        if (isLiftingAndDragging || isMovingItem || isResizingItem) {
+                        if (isLiftingAndDragging || isMovingItem || isResizingItem || isRotatingItem) {
                             isLiftingAndDragging = false
                             isMovingItem = false
                             isResizingItem = false
+                            isRotatingItem = false
                             pendingAudioPlay = null
                             state.commitTransform()
+                            return@pointerInteropFilter true
+                        }
+
+                        if (state.isDraggingLassoSelection || state.isScalingLassoSelection) {
+                            state.isDraggingLassoSelection = false
+                            state.isScalingLassoSelection = false
                             return@pointerInteropFilter true
                         }
 
@@ -532,6 +706,15 @@ fun TabletCanvasView(
                         previousSpan = 0f
                         viewportPointer0Id = null
                         viewportPointer1Id = null
+                        shapeHoldJob?.cancel()
+                        shapeHoldJob = null
+
+                        if (isAdjustingSnappedShape) {
+                            isAdjustingSnappedShape = false
+                            state.finishShape()
+                            activeDrawingPointerId = null
+                            return@pointerInteropFilter true
+                        }
 
                         if (activeDrawingPointerId != null) {
                             when (state.currentTool) {
@@ -540,6 +723,7 @@ fun TabletCanvasView(
                                 DrawingTool.STROKE_ERASER,
                                 DrawingTool.SEGMENT_ERASER -> state.finishErasing()
                                 DrawingTool.SHAPE -> state.finishShape()
+                                DrawingTool.LASSO -> state.finishLasso()
                                 else -> {}
                             }
                             activeDrawingPointerId = null
@@ -549,10 +733,19 @@ fun TabletCanvasView(
                     MotionEvent.ACTION_CANCEL -> {
                         longPressJob?.cancel()
                         longPressJob = null
+                        shapeHoldJob?.cancel()
+                        shapeHoldJob = null
+                        isAdjustingSnappedShape = false
                         isLiftingAndDragging = false
                         isMovingItem = false
                         isResizingItem = false
+                        isRotatingItem = false
+                        shapeHoldJob?.cancel()
+                        shapeHoldJob = null
+                        isAdjustingSnappedShape = false
                         isMarginPanning = false
+                        state.isDraggingLassoSelection = false
+                        state.isScalingLassoSelection = false
                         pendingTouchItem = null
                         pendingAudioPlay = null
                         isViewportGestureActive = false
@@ -560,6 +753,15 @@ fun TabletCanvasView(
                         previousSpan = 0f
                         viewportPointer0Id = null
                         viewportPointer1Id = null
+                        shapeHoldJob?.cancel()
+                        shapeHoldJob = null
+
+                        if (isAdjustingSnappedShape) {
+                            isAdjustingSnappedShape = false
+                            state.finishShape()
+                            activeDrawingPointerId = null
+                            return@pointerInteropFilter true
+                        }
                         if (state.activeStroke != null) state.cancelStroke()
                         if (state.activeShape != null) state.activeShape = null
                         if (state.isErasing) state.finishErasing()
@@ -677,10 +879,21 @@ fun TabletCanvasView(
                 // 5. Selected Item Transform & Action Overlay
                 val activeSel = state.selectedItem
                 if (activeSel != null) {
-                    drawSelectedItemOverlay(activeSel, curPage)
+                    drawSelectedItemOverlay(activeSel, curPage, viewport.scale)
+                }
+
+                // 6. Lasso Selection & Active Path Overlay
+                if (state.activeLassoPath.size > 1) {
+                    drawLassoPath(state.activeLassoPath, viewport.scale)
+                }
+                if (state.lassoSelection.isNotEmpty) {
+                    drawLassoSelectionOverlay(state.lassoSelection.bounds, viewport.scale)
                 }
             }
         }
+
+        // 7. Floating Action Bar for active Lasso Selection
+        LassoFloatingActionBar(state = state)
     }
 }
 
@@ -780,6 +993,39 @@ private fun DrawScope.drawVectorShape(shape: ShapeModel) {
                 size = Size(right - left, bottom - top),
                 style = style
             )
+        }
+        ShapeType.TRIANGLE -> {
+            val triPath = Path().apply {
+                if (shape.vertexX != null && shape.vertexY != null) {
+                    moveTo(shape.startX, shape.startY)
+                    lineTo(shape.vertexX, shape.vertexY)
+                    lineTo(shape.endX, shape.endY)
+                    close()
+                } else {
+                    val left = minOf(start.x, end.x)
+                    val top = minOf(start.y, end.y)
+                    val right = maxOf(start.x, end.x)
+                    val bottom = maxOf(start.y, end.y)
+                    moveTo((left + right) / 2f, top)
+                    lineTo(right, bottom)
+                    lineTo(left, bottom)
+                    close()
+                }
+            }
+            drawPath(path = triPath, color = color, style = style)
+        }
+        ShapeType.RIGHT_ANGLE -> {
+            val vertex = if (shape.vertexX != null && shape.vertexY != null) {
+                Offset(shape.vertexX, shape.vertexY)
+            } else {
+                Offset(start.x, end.y)
+            }
+            val anglePath = Path().apply {
+                moveTo(start.x, start.y)
+                lineTo(vertex.x, vertex.y)
+                lineTo(end.x, end.y)
+            }
+            drawPath(path = anglePath, color = color, style = style)
         }
     }
 }
@@ -984,6 +1230,26 @@ fun getImageBounds(img: ImageModel): Rect {
     return Rect(img.x, img.y, img.x + img.width, img.y + img.height)
 }
 
+fun rotatePoint(pt: Offset, center: Offset, degrees: Float): Offset {
+    val rad = Math.toRadians(degrees.toDouble())
+    val cos = kotlin.math.cos(rad).toFloat()
+    val sin = kotlin.math.sin(rad).toFloat()
+    val dx = pt.x - center.x
+    val dy = pt.y - center.y
+    return Offset(
+        x = center.x + (dx * cos - dy * sin),
+        y = center.y + (dx * sin + dy * cos)
+    )
+}
+
+fun isPointInImage(img: ImageModel, pt: Offset): Boolean {
+    val bounds = getImageBounds(img)
+    if (img.rotationDegrees == 0f) return bounds.contains(pt)
+    val center = Offset(img.x + img.width / 2f, img.y + img.height / 2f)
+    val unrotated = rotatePoint(pt, center, -img.rotationDegrees)
+    return bounds.contains(unrotated)
+}
+
 fun getShapeBounds(shape: ShapeModel): Rect {
     val pad = maxOf(shape.strokeWidth / 2f, 16f)
     val left = minOf(shape.startX, shape.endX) - pad
@@ -994,7 +1260,9 @@ fun getShapeBounds(shape: ShapeModel): Rect {
 }
 
 fun getAudioNoteBounds(audio: AudioNoteModel): Rect {
-    return Rect(audio.x - 64f, audio.y - 18f, audio.x + 64f, audio.y + 18f)
+    val halfW = audio.width / 2f
+    val halfH = audio.height / 2f
+    return Rect(audio.x - halfW, audio.y - halfH, audio.x + halfW, audio.y + halfH)
 }
 
 fun getSelectedItemBounds(item: SelectedItem, page: PageModel): Rect? {
@@ -1023,11 +1291,31 @@ private fun DrawScope.drawImages(
             }
         }
         if (bmp != null) {
-            drawImage(
-                image = bmp,
-                dstOffset = IntOffset(img.x.toInt(), img.y.toInt()),
-                dstSize = IntSize(img.width.toInt(), img.height.toInt())
-            )
+            val dstOffset = IntOffset(img.x.toInt(), img.y.toInt())
+            val dstSize = IntSize(img.width.toInt(), img.height.toInt())
+            val alpha = img.opacity.coerceIn(0.05f, 1.0f)
+            if (img.rotationDegrees != 0f) {
+                withTransform({
+                    rotate(
+                        degrees = img.rotationDegrees,
+                        pivot = Offset(img.x + img.width / 2f, img.y + img.height / 2f)
+                    )
+                }) {
+                    drawImage(
+                        image = bmp,
+                        dstOffset = dstOffset,
+                        dstSize = dstSize,
+                        alpha = alpha
+                    )
+                }
+            } else {
+                drawImage(
+                    image = bmp,
+                    dstOffset = dstOffset,
+                    dstSize = dstSize,
+                    alpha = alpha
+                )
+            }
         }
     }
 }
@@ -1039,7 +1327,6 @@ private fun DrawScope.drawAudioNotes(
 ) {
     val paint = android.graphics.Paint().apply {
         isAntiAlias = true
-        textSize = 24f
         typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
         color = android.graphics.Color.WHITE
     }
@@ -1048,66 +1335,74 @@ private fun DrawScope.drawAudioNotes(
         val bounds = getAudioNoteBounds(audio)
         val isCurrentPlaying = playingAudioPath == audio.localPath && isPlaying
         val pillBgColor = if (isCurrentPlaying) Color(0xFF2563EB) else Color(0xFF1E293B)
+        val cornerRadiusPx = (bounds.height / 2f).coerceAtMost(24f)
 
         // Pill background with subtle shadow
         drawRoundRect(
             color = Color(0x33000000),
             topLeft = Offset(bounds.left + 2f, bounds.top + 3f),
             size = Size(bounds.width, bounds.height),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(18f, 18f)
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadiusPx, cornerRadiusPx)
         )
         drawRoundRect(
             color = pillBgColor,
             topLeft = Offset(bounds.left, bounds.top),
             size = Size(bounds.width, bounds.height),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(18f, 18f)
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadiusPx, cornerRadiusPx)
         )
 
-        // Mic indicator dot (red dot if recording/audio, blue if currently playing)
+        // Mic indicator dot
+        val micRadius = (bounds.height * 0.14f).coerceIn(4f, 8f)
+        val micX = bounds.left + micRadius * 3f
         drawCircle(
             color = if (isCurrentPlaying) Color(0xFF60A5FA) else Color(0xFFEF4444),
-            radius = 5f,
-            center = Offset(bounds.left + 16f, audio.y)
+            radius = micRadius,
+            center = Offset(micX, audio.y)
         )
 
         // Duration / timer text
         val durSec = (audio.durationMs / 1000L).coerceAtLeast(1L)
         val timeStr = String.format("%02d:%02d", durSec / 60, durSec % 60)
+        val fontSize = (bounds.height * 0.40f).coerceIn(12f, 26f)
+        paint.textSize = fontSize
+
+        val textX = micX + micRadius * 2f + 4f
+        val textY = audio.y + fontSize * 0.35f
         drawContext.canvas.nativeCanvas.drawText(
             timeStr,
-            bounds.left + 26f,
-            audio.y + 8f,
+            textX,
+            textY,
             paint
         )
 
         // Play/Pause circular button area on right side of pill
-        val playCenter = Offset(bounds.right - 18f, audio.y)
+        val playBtnRadius = (bounds.height * 0.32f).coerceIn(10f, 24f)
+        val playCenter = Offset(bounds.right - playBtnRadius - 8f, audio.y)
         drawCircle(
             color = Color.White.copy(alpha = 0.25f),
-            radius = 12f,
+            radius = playBtnRadius,
             center = playCenter
         )
 
+        val iconScale = (playBtnRadius / 12f).coerceIn(0.8f, 2.0f)
         if (isCurrentPlaying) {
-            // Pause bars
             drawLine(
                 color = Color.White,
-                start = Offset(playCenter.x - 3f, playCenter.y - 5f),
-                end = Offset(playCenter.x - 3f, playCenter.y + 5f),
-                strokeWidth = 2.5f
+                start = Offset(playCenter.x - 3f * iconScale, playCenter.y - 5f * iconScale),
+                end = Offset(playCenter.x - 3f * iconScale, playCenter.y + 5f * iconScale),
+                strokeWidth = 2.5f * iconScale
             )
             drawLine(
                 color = Color.White,
-                start = Offset(playCenter.x + 3f, playCenter.y - 5f),
-                end = Offset(playCenter.x + 3f, playCenter.y + 5f),
-                strokeWidth = 2.5f
+                start = Offset(playCenter.x + 3f * iconScale, playCenter.y - 5f * iconScale),
+                end = Offset(playCenter.x + 3f * iconScale, playCenter.y + 5f * iconScale),
+                strokeWidth = 2.5f * iconScale
             )
         } else {
-            // Play triangle
             val playPath = Path().apply {
-                moveTo(playCenter.x - 3.5f, playCenter.y - 5.5f)
-                lineTo(playCenter.x + 5f, playCenter.y)
-                lineTo(playCenter.x - 3.5f, playCenter.y + 5.5f)
+                moveTo(playCenter.x - 3.5f * iconScale, playCenter.y - 5.5f * iconScale)
+                lineTo(playCenter.x + 5f * iconScale, playCenter.y)
+                lineTo(playCenter.x - 3.5f * iconScale, playCenter.y + 5.5f * iconScale)
                 close()
             }
             drawPath(playPath, color = Color.White)
@@ -1115,91 +1410,220 @@ private fun DrawScope.drawAudioNotes(
     }
 }
 
+data class FloatingToolbarBounds(
+    val actionBtnRect: Rect?,
+    val rot90BtnRect: Rect?,
+    val opacityBtnRect: Rect?,
+    val deleteBtnRect: Rect
+)
+
+fun calculateItemFloatingToolbarBounds(
+    item: SelectedItem,
+    page: PageModel,
+    viewportScale: Float
+): FloatingToolbarBounds? {
+    val bounds = getSelectedItemBounds(item, page) ?: return null
+    val invScale = 1f / viewportScale.coerceIn(0.15f, 4f)
+    val btnH = (32f * invScale).coerceIn(26f, 68f)
+    val gap = (6f * invScale).coerceIn(4f, 14f)
+    val marginAbove = (14f * invScale).coerceIn(10f, 32f)
+
+    val (centerX, topY) = if (item.type == SelectableType.IMAGE) {
+        val img = page.images.firstOrNull { it.id == item.id }
+        val rot = img?.rotationDegrees ?: 0f
+        val cx = bounds.left + bounds.width / 2f
+        val cy = bounds.top + bounds.height / 2f
+        if (rot == 0f) {
+            Pair(cx, bounds.top - 28f * invScale)
+        } else {
+            val rad = Math.toRadians(rot.toDouble())
+            val cos = kotlin.math.cos(rad)
+            val sin = kotlin.math.sin(rad)
+            val hw = bounds.width / 2.0
+            val hh = bounds.height / 2.0
+
+            val y1 = cy + (-hw * sin - hh * cos).toFloat()
+            val y2 = cy + (hw * sin - hh * cos).toFloat()
+            val y3 = cy + (hw * sin + hh * cos).toFloat()
+            val y4 = cy + (-hw * sin + hh * cos).toFloat()
+
+            val rotHandleDy = -(hh + 28.0 * invScale)
+            val rotHandleY = cy + (rotHandleDy * cos).toFloat()
+
+            val minY = minOf(y1, y2, y3, y4, rotHandleY)
+            Pair(cx, minY)
+        }
+    } else {
+        Pair(bounds.left + bounds.width / 2f, bounds.top)
+    }
+
+    val toolbarTop = topY - marginAbove - btnH
+
+    val actionW = if (item.type != SelectableType.SHAPE) (88f * invScale).coerceIn(72f, 160f) else 0f
+    val rot90W = if (item.type == SelectableType.IMAGE) (58f * invScale).coerceIn(50f, 110f) else 0f
+    val opacityW = if (item.type == SelectableType.IMAGE) (86f * invScale).coerceIn(68f, 150f) else 0f
+    val deleteW = (54f * invScale).coerceIn(46f, 100f)
+
+    val totalW = (if (actionW > 0f) actionW + gap else 0f) +
+            (if (rot90W > 0f) rot90W + gap else 0f) +
+            (if (opacityW > 0f) opacityW + gap else 0f) +
+            deleteW
+
+    var curX = centerX - totalW / 2f
+
+    val actionRect = if (actionW > 0f) Rect(curX, toolbarTop, curX + actionW, toolbarTop + btnH).also { curX += actionW + gap } else null
+    val rot90Rect = if (rot90W > 0f) Rect(curX, toolbarTop, curX + rot90W, toolbarTop + btnH).also { curX += rot90W + gap } else null
+    val opacityRect = if (opacityW > 0f) Rect(curX, toolbarTop, curX + opacityW, toolbarTop + btnH).also { curX += opacityW + gap } else null
+    val deleteRect = Rect(curX, toolbarTop, curX + deleteW, toolbarTop + btnH)
+
+    return FloatingToolbarBounds(actionRect, rot90Rect, opacityRect, deleteRect)
+}
+
 private fun DrawScope.drawSelectedItemOverlay(
     item: SelectedItem,
-    page: PageModel
+    page: PageModel,
+    viewportScale: Float
 ) {
     val bounds = getSelectedItemBounds(item, page) ?: return
+    val img = if (item.type == SelectableType.IMAGE) page.images.firstOrNull { it.id == item.id } else null
+    val rot = img?.rotationDegrees ?: 0f
+    val center = Offset(bounds.left + bounds.width / 2f, bounds.top + bounds.height / 2f)
+    val invScale = 1f / viewportScale.coerceIn(0.15f, 4f)
 
-    // Soft border around the selected item
-    drawRoundRect(
-        color = Color(0x222563EB),
-        topLeft = Offset(bounds.left, bounds.top),
-        size = Size(bounds.width, bounds.height),
-        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
-    )
-    drawRoundRect(
-        color = Color(0xFF2563EB),
-        topLeft = Offset(bounds.left, bounds.top),
-        size = Size(bounds.width, bounds.height),
-        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f),
-        style = Stroke(width = 2f)
-    )
-
-    // Corner dots (top-left, top-right, bottom-left)
-    val dotRadius = 4.5f
-    listOf(
-        Offset(bounds.left, bounds.top),
-        Offset(bounds.right, bounds.top),
-        Offset(bounds.left, bounds.bottom)
-    ).forEach { pt ->
-        drawCircle(color = Color.White, radius = dotRadius, center = pt)
-        drawCircle(color = Color(0xFF2563EB), radius = dotRadius, center = pt, style = Stroke(width = 1.5f))
-    }
-
-    // Bottom-right RESIZE HANDLE
-    val resizeCenter = Offset(bounds.right, bounds.bottom)
-    val resizeRadius = 10f
-    drawCircle(color = Color(0xFF2563EB), radius = resizeRadius, center = resizeCenter)
-    drawCircle(color = Color.White, radius = resizeRadius, center = resizeCenter, style = Stroke(width = 2f))
-    drawLine(
-        color = Color.White,
-        start = Offset(resizeCenter.x - 4f, resizeCenter.y - 4f),
-        end = Offset(resizeCenter.x + 4f, resizeCenter.y + 4f),
-        strokeWidth = 2f,
-        cap = StrokeCap.Round
-    )
-
-    // Top Action buttons: [ Action ]  [ Delete ]
-    val pillY = bounds.top - 28f
-    val actionText = when (item.type) {
-        SelectableType.TEXT_BOX -> "Edit"
-        SelectableType.IMAGE -> {
-            val img = page.images.firstOrNull { it.id == item.id }
-            if (img?.keepAspectRatio == true) "Aspect: Lock" else "Aspect: Free"
+    // Part 1: Rotated Selection Frame & Handles (rotates with image)
+    withTransform({
+        if (rot != 0f) {
+            rotate(degrees = rot, pivot = center)
         }
-        SelectableType.AUDIO_NOTE -> "Options"
-        SelectableType.SHAPE -> null
-    }
-
-    if (actionText != null) {
+    }) {
+        // Crisp outline stroke around the item (NO filled tint to preserve original photo visibility)
         drawRoundRect(
-            color = Color(0xFF1E293B),
-            topLeft = Offset(bounds.left, pillY),
-            size = Size(80f, 22f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+            color = Color(0xFF2563EB),
+            topLeft = Offset(bounds.left, bounds.top),
+            size = Size(bounds.width, bounds.height),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f * invScale, 6f * invScale),
+            style = Stroke(width = (2f * invScale).coerceIn(1.5f, 5f))
         )
-        val textPaint = android.graphics.Paint().apply {
-            isAntiAlias = true
-            color = android.graphics.Color.WHITE
-            textSize = 10f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
+
+        // Corner dots
+        val dotRadius = (4.5f * invScale).coerceIn(4f, 12f)
+        listOf(
+            Offset(bounds.left, bounds.top),
+            Offset(bounds.right, bounds.top),
+            Offset(bounds.left, bounds.bottom)
+        ).forEach { pt ->
+            drawCircle(color = Color.White, radius = dotRadius, center = pt)
+            drawCircle(color = Color(0xFF2563EB), radius = dotRadius, center = pt, style = Stroke(width = (1.5f * invScale).coerceIn(1f, 3.5f)))
         }
-        drawContext.canvas.nativeCanvas.drawText(actionText, bounds.left + 8f, pillY + 15f, textPaint)
+
+        // Bottom-right RESIZE HANDLE
+        val resizeCenter = Offset(bounds.right, bounds.bottom)
+        val resizeRadius = (10f * invScale).coerceIn(9f, 24f)
+        drawCircle(color = Color(0xFF2563EB), radius = resizeRadius, center = resizeCenter)
+        drawCircle(color = Color.White, radius = resizeRadius, center = resizeCenter, style = Stroke(width = (2f * invScale).coerceIn(1.5f, 4f)))
+        drawLine(
+            color = Color.White,
+            start = Offset(resizeCenter.x - 4f * invScale, resizeCenter.y - 4f * invScale),
+            end = Offset(resizeCenter.x + 4f * invScale, resizeCenter.y + 4f * invScale),
+            strokeWidth = (2f * invScale).coerceIn(1.5f, 4f),
+            cap = StrokeCap.Round
+        )
+
+        // Top ROTATE HANDLE for Images
+        if (item.type == SelectableType.IMAGE) {
+            val rotHandleCenter = Offset(center.x, bounds.top - 28f * invScale)
+            val rotRadius = (9f * invScale).coerceIn(8f, 22f)
+            drawLine(
+                color = Color(0xFF2563EB),
+                start = Offset(center.x, bounds.top),
+                end = rotHandleCenter,
+                strokeWidth = (2f * invScale).coerceIn(1.5f, 4f)
+            )
+            drawCircle(color = Color(0xFF2563EB), radius = rotRadius, center = rotHandleCenter)
+            drawCircle(color = Color.White, radius = rotRadius, center = rotHandleCenter, style = Stroke(width = (2f * invScale).coerceIn(1.5f, 4f)))
+        }
     }
 
-    val delLeft = if (actionText != null) bounds.left + 86f else bounds.left
-    drawRoundRect(
-        color = Color(0xFFDC2626),
-        topLeft = Offset(delLeft, pillY),
-        size = Size(52f, 22f),
-        cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
-    )
-    val delPaint = android.graphics.Paint().apply {
+    // Part 2: Upright Floating Toolbar (OUTSIDE rotation transform so it NEVER rotates with the image)
+    val toolbar = calculateItemFloatingToolbarBounds(item, page, viewportScale) ?: return
+    val cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f * invScale, 6f * invScale)
+    val textPaint = android.graphics.Paint().apply {
         isAntiAlias = true
         color = android.graphics.Color.WHITE
-        textSize = 11f
+        textSize = (11f * invScale).coerceIn(10f, 24f)
         typeface = android.graphics.Typeface.DEFAULT_BOLD
     }
-    drawContext.canvas.nativeCanvas.drawText("Delete", delLeft + 10f, pillY + 15f, delPaint)
+
+    // A. Action Button
+    if (toolbar.actionBtnRect != null) {
+        val actionText = when (item.type) {
+            SelectableType.TEXT_BOX -> "Edit"
+            SelectableType.IMAGE -> if (img?.keepAspectRatio == true) "Aspect: Lock" else "Aspect: Free"
+            SelectableType.AUDIO_NOTE -> "Options"
+            SelectableType.SHAPE -> ""
+        }
+        drawRoundRect(
+            color = Color(0xFF1E293B),
+            topLeft = Offset(toolbar.actionBtnRect.left, toolbar.actionBtnRect.top),
+            size = Size(toolbar.actionBtnRect.width, toolbar.actionBtnRect.height),
+            cornerRadius = cornerRadius
+        )
+        val textY = toolbar.actionBtnRect.top + toolbar.actionBtnRect.height * 0.68f
+        drawContext.canvas.nativeCanvas.drawText(
+            actionText,
+            toolbar.actionBtnRect.left + 8f * invScale,
+            textY,
+            textPaint
+        )
+    }
+
+    // B. Rotate 90 Button
+    if (toolbar.rot90BtnRect != null) {
+        drawRoundRect(
+            color = Color(0xFF334155),
+            topLeft = Offset(toolbar.rot90BtnRect.left, toolbar.rot90BtnRect.top),
+            size = Size(toolbar.rot90BtnRect.width, toolbar.rot90BtnRect.height),
+            cornerRadius = cornerRadius
+        )
+        val textY = toolbar.rot90BtnRect.top + toolbar.rot90BtnRect.height * 0.68f
+        drawContext.canvas.nativeCanvas.drawText(
+            "⟳ 90°",
+            toolbar.rot90BtnRect.left + 8f * invScale,
+            textY,
+            textPaint
+        )
+    }
+
+    // C. Opacity Button
+    if (toolbar.opacityBtnRect != null && img != null) {
+        val opacityPct = (img.opacity * 100f).toInt()
+        drawRoundRect(
+            color = Color(0xFF475569),
+            topLeft = Offset(toolbar.opacityBtnRect.left, toolbar.opacityBtnRect.top),
+            size = Size(toolbar.opacityBtnRect.width, toolbar.opacityBtnRect.height),
+            cornerRadius = cornerRadius
+        )
+        val textY = toolbar.opacityBtnRect.top + toolbar.opacityBtnRect.height * 0.68f
+        drawContext.canvas.nativeCanvas.drawText(
+            "Opacity $opacityPct%",
+            toolbar.opacityBtnRect.left + 6f * invScale,
+            textY,
+            textPaint
+        )
+    }
+
+    // D. Delete Button
+    drawRoundRect(
+        color = Color(0xFFDC2626),
+        topLeft = Offset(toolbar.deleteBtnRect.left, toolbar.deleteBtnRect.top),
+        size = Size(toolbar.deleteBtnRect.width, toolbar.deleteBtnRect.height),
+        cornerRadius = cornerRadius
+    )
+    val delTextY = toolbar.deleteBtnRect.top + toolbar.deleteBtnRect.height * 0.68f
+    drawContext.canvas.nativeCanvas.drawText(
+        "Delete",
+        toolbar.deleteBtnRect.left + 8f * invScale,
+        delTextY,
+        textPaint
+    )
 }

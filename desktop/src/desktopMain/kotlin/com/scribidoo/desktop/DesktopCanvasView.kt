@@ -61,10 +61,15 @@ import com.scribidoo.app.canvas.ink.InkPathGenerator
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.model.DrawingTool
 import com.scribidoo.app.canvas.model.ShapeModel
+import com.scribidoo.app.canvas.shape.ShapeRecognitionEngine
 import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.model.StrokeModel
 import com.scribidoo.app.canvas.model.TextBoxModel
 import com.scribidoo.app.canvas.state.CanvasState
+import com.scribidoo.app.canvas.ui.drawLassoPath
+import com.scribidoo.app.canvas.ui.drawLassoSelectionOverlay
+import com.scribidoo.app.canvas.ui.isInsideLassoMenu
+import com.scribidoo.app.canvas.ui.isInsideLassoScaleHandle
 import com.scribidoo.app.canvas.viewport.ViewportState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -78,11 +83,15 @@ fun DesktopCanvasView(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current.density
 
     // Text box transformation & selection states
     var isMovingTextBox by remember { mutableStateOf(false) }
     var isResizingTextBox by remember { mutableStateOf(false) }
     var longPressJob by remember { mutableStateOf<Job?>(null) }
+    var shapeHoldJob by remember { mutableStateOf<Job?>(null) }
+    var isAdjustingSnappedShape by remember { mutableStateOf(false) }
+    var lastHoldCheckCanvasPoint by remember { mutableStateOf(Offset.Zero) }
     var initialTouchCanvas by remember { mutableStateOf(Offset.Zero) }
     var lastTouchCanvas by remember { mutableStateOf(Offset.Zero) }
     var initialFontSize by remember { mutableFloatStateOf(16f) }
@@ -225,6 +234,31 @@ fun DesktopCanvasView(
                                         state.selectedTextBoxId = null
                                     }
 
+                                    // 3b. Check for Active Lasso Selection interactions
+                                    if (state.currentTool == DrawingTool.LASSO && state.lassoSelection.isNotEmpty) {
+                                        val lassoBounds = state.lassoSelection.bounds
+                                        if (isInsideLassoMenu(screenPoint, lassoBounds, state.viewportState, density)) {
+                                            continue
+                                        }
+                                        if (isInsideLassoScaleHandle(canvasPoint, lassoBounds, state.viewportState.scale)) {
+                                            state.isScalingLassoSelection = true
+                                            state.pushHistory()
+                                            lastTouchCanvas = canvasPoint
+                                            initialTouchCanvas = canvasPoint
+                                            change.consume()
+                                            continue
+                                        } else if (lassoBounds.contains(canvasPoint)) {
+                                            state.isDraggingLassoSelection = true
+                                            state.pushHistory()
+                                            lastTouchCanvas = canvasPoint
+                                            initialTouchCanvas = canvasPoint
+                                            change.consume()
+                                            continue
+                                        } else {
+                                            state.clearLasso()
+                                        }
+                                    }
+
                                     // 4. Check for Long-press on any text box
                                     val hitBox = state.currentPage.textBoxes.lastOrNull { tb ->
                                         getDesktopTextBoxBounds(tb).contains(canvasPoint)
@@ -246,6 +280,10 @@ fun DesktopCanvasView(
                                     }
 
                                     // Start drawing action
+                                    shapeHoldJob?.cancel()
+                                    shapeHoldJob = null
+                                    isAdjustingSnappedShape = false
+                                    lastHoldCheckCanvasPoint = canvasPoint
                                     when (state.currentTool) {
                                         DrawingTool.PEN,
                                         DrawingTool.HIGHLIGHTER -> {
@@ -264,6 +302,9 @@ fun DesktopCanvasView(
                                                 state.activeTextBoxForEdit = null
                                                 state.pendingTextInsertPoint = canvasPoint
                                             }
+                                        }
+                                        DrawingTool.LASSO -> {
+                                            state.startLasso(canvasPoint)
                                         }
                                         else -> {}
                                     }
@@ -359,11 +400,67 @@ fun DesktopCanvasView(
                                         continue
                                     }
 
+                                    if (state.isScalingLassoSelection) {
+                                        val bounds = state.lassoSelection.bounds
+                                        val pivot = bounds.topLeft
+                                        val prevDistX = lastTouchCanvas.x - pivot.x
+                                        val curDistX = canvasPoint.x - pivot.x
+                                        if (prevDistX > 10f && curDistX > 10f) {
+                                            val factor = curDistX / prevDistX
+                                            state.scaleLassoSelection(factor, pivot)
+                                        }
+                                        lastTouchCanvas = canvasPoint
+                                        change.consume()
+                                        continue
+                                    }
+
+                                    if (state.isDraggingLassoSelection) {
+                                        val delta = canvasPoint - lastTouchCanvas
+                                        lastTouchCanvas = canvasPoint
+                                        state.moveLassoSelection(delta.x, delta.y)
+                                        change.consume()
+                                        continue
+                                    }
+
                                     // In-progress drawing
                                     when (state.currentTool) {
                                         DrawingTool.PEN,
                                         DrawingTool.HIGHLIGHTER -> {
-                                            state.appendStrokePoint(canvasPoint, pressure)
+                                            if (isAdjustingSnappedShape) {
+                                                state.adjustSnappedShape(canvasPoint)
+                                            } else {
+                                                state.appendStrokePoint(canvasPoint, pressure)
+                                                if (state.palmConfig.isShapeRecognitionEnabled) {
+                                                    val dHold = canvasPoint - lastHoldCheckCanvasPoint
+                                                    val distHold = hypot(dHold.x, dHold.y)
+                                                    if (distHold > state.viewportState.screenToCanvasDist(14f)) {
+                                                        lastHoldCheckCanvasPoint = canvasPoint
+                                                        shapeHoldJob?.cancel()
+                                                        shapeHoldJob = coroutineScope.launch {
+                                                            delay(state.palmConfig.shapeHoldDurationMs)
+                                                            val stroke = state.activeStroke
+                                                            if (stroke != null && stroke.points.size >= 8) {
+                                                                val recognized = ShapeRecognitionEngine.recognize(stroke.points)
+                                                                if (recognized != null) {
+                                                                    val shape = ShapeModel(
+                                                                        type = recognized.type,
+                                                                        startX = recognized.startX,
+                                                                        startY = recognized.startY,
+                                                                        endX = recognized.endX,
+                                                                        endY = recognized.endY,
+                                                                        vertexX = recognized.vertexX,
+                                                                        vertexY = recognized.vertexY,
+                                                                        strokeColorArgb = stroke.colorArgb,
+                                                                        strokeWidth = stroke.strokeWidth
+                                                                    )
+                                                                    state.snapStrokeToShape(shape, holdOrigin = canvasPoint)
+                                                                    isAdjustingSnappedShape = true
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                         DrawingTool.STROKE_ERASER,
                                         DrawingTool.SEGMENT_ERASER -> {
@@ -372,6 +469,9 @@ fun DesktopCanvasView(
                                         }
                                         DrawingTool.SHAPE -> {
                                             state.updateShape(canvasPoint)
+                                        }
+                                        DrawingTool.LASSO -> {
+                                            state.appendLassoPoint(canvasPoint)
                                         }
                                         else -> {}
                                     }
@@ -407,10 +507,25 @@ fun DesktopCanvasView(
                                     state.finishErasing()
                                 }
 
+                                shapeHoldJob?.cancel()
+                                shapeHoldJob = null
+
+                                if (isAdjustingSnappedShape) {
+                                    isAdjustingSnappedShape = false
+                                    state.finishShape()
+                                    changes.forEach { it.consume() }
+                                    continue
+                                }
+
                                 if (isMovingTextBox || isResizingTextBox) {
                                     isMovingTextBox = false
                                     isResizingTextBox = false
                                     state.commitTransform()
+                                } else if (state.isDraggingLassoSelection || state.isScalingLassoSelection) {
+                                    state.isDraggingLassoSelection = false
+                                    state.isScalingLassoSelection = false
+                                } else if (state.currentTool == DrawingTool.LASSO && state.lassoSelection.isNotEmpty && changes.firstOrNull()?.let { isInsideLassoMenu(it.position, state.lassoSelection.bounds, state.viewportState, density) } == true) {
+                                    continue
                                 } else {
                                     if (pendingTouchTextBoxId != null) {
                                         val tappedId = pendingTouchTextBoxId
@@ -430,6 +545,9 @@ fun DesktopCanvasView(
                                         }
                                         DrawingTool.SHAPE -> {
                                             state.finishShape()
+                                        }
+                                        DrawingTool.LASSO -> {
+                                            state.finishLasso()
                                         }
                                         else -> {}
                                     }
@@ -494,9 +612,19 @@ fun DesktopCanvasView(
                     selectedTextBoxId = state.selectedTextBoxId,
                     textMeasurer = textMeasurer
                 )
+
+                // 5. Lasso Selection & Active Loop Overlay
+                if (state.activeLassoPath.size > 1) {
+                    drawLassoPath(state.activeLassoPath, state.viewportState.scale)
+                }
+                if (state.lassoSelection.isNotEmpty) {
+                    drawLassoSelectionOverlay(state.lassoSelection.bounds, state.viewportState.scale)
+                }
             }
         }
 
+        // Floating Action Bar for Lasso Selection
+        DesktopLassoFloatingActionBar(state = state)
     }
 }
 
@@ -709,6 +837,39 @@ private fun DrawScope.drawVectorShape(shape: ShapeModel) {
                 size = Size(right - left, bottom - top),
                 style = style
             )
+        }
+        ShapeType.TRIANGLE -> {
+            val triPath = Path().apply {
+                if (shape.vertexX != null && shape.vertexY != null) {
+                    moveTo(shape.startX, shape.startY)
+                    lineTo(shape.vertexX, shape.vertexY)
+                    lineTo(shape.endX, shape.endY)
+                    close()
+                } else {
+                    val left = minOf(start.x, end.x)
+                    val top = minOf(start.y, end.y)
+                    val right = maxOf(start.x, end.x)
+                    val bottom = maxOf(start.y, end.y)
+                    moveTo((left + right) / 2f, top)
+                    lineTo(right, bottom)
+                    lineTo(left, bottom)
+                    close()
+                }
+            }
+            drawPath(path = triPath, color = color, style = style)
+        }
+        ShapeType.RIGHT_ANGLE -> {
+            val vertex = if (shape.vertexX != null && shape.vertexY != null) {
+                Offset(shape.vertexX, shape.vertexY)
+            } else {
+                Offset(start.x, end.y)
+            }
+            val anglePath = Path().apply {
+                moveTo(start.x, start.y)
+                lineTo(vertex.x, vertex.y)
+                lineTo(end.x, end.y)
+            }
+            drawPath(path = anglePath, color = color, style = style)
         }
     }
 }

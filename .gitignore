@@ -11,3 +11,5 @@ build/
 .cxx
 dist/
 **/dist/
+phone_*.png
+

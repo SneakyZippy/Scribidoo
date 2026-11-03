@@ -82,8 +82,9 @@ class InputClassifier(
         val s1 = event.getSize(1)
 
         // Absolute limits for legitimate fingertips
-        if (m0 > config.touchMajorThresholdPx || m1 > config.touchMajorThresholdPx) return false
-        if (s0 > config.touchSizeThreshold || s1 > config.touchSizeThreshold) return false
+        val zoomLimit = maxOf(config.touchMajorThresholdPx * 1.15f, config.twoFingerMajorThresholdPx)
+        if (m0 > zoomLimit || m1 > zoomLimit) return false
+        if (s0 > config.touchSizeThreshold * 1.25f || s1 > config.touchSizeThreshold * 1.25f) return false
 
         // Relative symmetry: genuine two-finger pinch/zoom contacts are almost identical in size (ratio < 1.75).
         // A resting palm alongside a fingertip has a large size disparity (ratio > 1.8).

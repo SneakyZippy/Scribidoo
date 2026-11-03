@@ -1,25 +1,27 @@
 package com.scribidoo.app.canvas.ui
 
 import android.content.res.Configuration
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,9 +32,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,20 +41,29 @@ import com.scribidoo.app.canvas.input.DominantHand
 import com.scribidoo.app.canvas.input.PalmRejectionConfig
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.state.CanvasState
+import com.scribidoo.app.onboarding.OnboardingCalibrationDialog
+import com.scribidoo.app.preference.UserPreferencesManager
 
 @Composable
 fun CanvasSettingsDialog(
     state: CanvasState,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val prefManager = remember { UserPreferencesManager(context) }
+
     var fingerDraw by remember { mutableStateOf(state.palmConfig.isFingerDrawingEnabled) }
     var touchSize by remember { mutableFloatStateOf(state.palmConfig.touchSizeThreshold) }
     var touchMajor by remember { mutableFloatStateOf(state.palmConfig.touchMajorThresholdPx) }
-    var shieldRatio by remember { mutableFloatStateOf(state.palmConfig.palmShieldBottomRatio) }
     var dominantHand by remember { mutableStateOf(state.palmConfig.dominantHand) }
     var layoutMode by remember { mutableStateOf(state.document.layoutMode) }
     var constrainDrawing by remember { mutableStateOf(state.palmConfig.constrainDrawingToPage) }
+    var isShapeRecognitionEnabled by remember { mutableStateOf(state.palmConfig.isShapeRecognitionEnabled) }
+    var shapeHoldDurationMs by remember { mutableFloatStateOf(state.palmConfig.shapeHoldDurationMs.toFloat()) }
     var hiddenTools by remember { mutableStateOf(state.palmConfig.hiddenTools) }
+
+    var showCalibrationDialog by remember { mutableStateOf(false) }
+    val calibratedMetrics = remember { prefManager.loadCalibratedTipMetrics() }
 
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -63,16 +73,32 @@ fun CanvasSettingsDialog(
         fingerDraw = defaults.isFingerDrawingEnabled
         touchSize = defaults.touchSizeThreshold
         touchMajor = defaults.touchMajorThresholdPx
-        shieldRatio = defaults.palmShieldBottomRatio
         dominantHand = defaults.dominantHand
         layoutMode = CanvasLayoutMode.PAGED
         constrainDrawing = false
+        isShapeRecognitionEnabled = defaults.isShapeRecognitionEnabled
+        shapeHoldDurationMs = defaults.shapeHoldDurationMs.toFloat()
         hiddenTools = emptySet()
+    }
+
+    if (showCalibrationDialog) {
+        OnboardingCalibrationDialog(
+            initialConfig = state.palmConfig,
+            onDismiss = { showCalibrationDialog = false },
+            onComplete = { newConfig ->
+                state.palmConfig = newConfig
+                fingerDraw = newConfig.isFingerDrawingEnabled
+                touchSize = newConfig.touchSizeThreshold
+                touchMajor = newConfig.touchMajorThresholdPx
+                dominantHand = newConfig.dominantHand
+                showCalibrationDialog = false
+            }
+        )
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.widthIn(max = if (isLandscape) 640.dp else 400.dp),
+        modifier = Modifier.widthIn(max = if (isLandscape) 640.dp else 420.dp),
         title = {
             Text(
                 text = "Canvas & Input Preferences",
@@ -80,281 +106,118 @@ fun CanvasSettingsDialog(
             )
         },
         text = {
-            if (isLandscape) {
-                // Wide landscape layout: 2 columns side-by-side (No vertical overflow!)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 280.dp),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = if (isLandscape) 320.dp else 440.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Calibration Quick Launcher Banner
+                OutlinedButton(
+                    onClick = { showCalibrationDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    // Column 1: Palm Sliders & Handedness
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Calibrate Touch Size & Palm Rejection", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         Text(
-                            text = "PALM REJECTION SENSITIVITY",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-
-                        // Contact Size Threshold Slider
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Contact Size Filter", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                                Text("${(touchSize * 100).toInt()}%", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                            }
-                            Slider(
-                                value = touchSize,
-                                onValueChange = { touchSize = it },
-                                valueRange = 0.15f..0.60f
-                            )
-                        }
-
-                        // Major Axis Limit Slider
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Contact Diameter", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                                Text("${touchMajor.toInt()} px", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                            }
-                            Slider(
-                                value = touchMajor,
-                                onValueChange = { touchMajor = it },
-                                valueRange = 60f..260f
-                            )
-                        }
-
-                        // Palm Shield Bottom Ratio Slider
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Palm Shield Bottom Zone", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                                Text("${(shieldRatio * 100).toInt()}%", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                            }
-                            Slider(
-                                value = shieldRatio,
-                                onValueChange = { shieldRatio = it },
-                                valueRange = 0.0f..0.45f
-                            )
-                        }
-                    }
-
-                    // Column 2: Toggles, Dominant Hand, and Layout
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = "INPUT & ORIENTATION",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-
-                        // Finger Draw Toggle
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Draw with Finger", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            Switch(
-                                checked = fingerDraw,
-                                onCheckedChange = { fingerDraw = it }
-                            )
-                        }
-
-                        // Dominant Hand Selector
-                        Text("Writing Hand", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            HandSelectorButton(
-                                label = "Right-Handed",
-                                selected = dominantHand == DominantHand.RIGHT_HANDED,
-                                onClick = { dominantHand = DominantHand.RIGHT_HANDED },
-                                modifier = Modifier.weight(1f)
-                            )
-                            HandSelectorButton(
-                                label = "Left-Handed",
-                                selected = dominantHand == DominantHand.LEFT_HANDED,
-                                onClick = { dominantHand = DominantHand.LEFT_HANDED },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                        // Constrain drawing to paper
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Constrain Drawing to Paper", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                Text("Margin touches pan; ink clipped to edges", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Switch(
-                                checked = constrainDrawing,
-                                onCheckedChange = { constrainDrawing = it }
-                            )
-                        }
-
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                        Text(
-                            text = "CANVAS MODE",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            HandSelectorButton(
-                                label = "Paged A4",
-                                selected = layoutMode == CanvasLayoutMode.PAGED,
-                                onClick = { layoutMode = CanvasLayoutMode.PAGED },
-                                modifier = Modifier.weight(1f)
-                            )
-                            HandSelectorButton(
-                                label = "Infinite",
-                                selected = layoutMode == CanvasLayoutMode.INFINITE,
-                                onClick = { layoutMode = CanvasLayoutMode.INFINITE },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                        Text(
-                            text = "TOOLBAR CUSTOMIZATION",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Long-press any tool icon on the toolbar to hide it. Tap below to reset:",
+                            text = if (calibratedMetrics != null) "Current calibration: tip ~${calibratedMetrics.first.toInt()} px"
+                            else "Tap to draw with tip and optimize thresholds",
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        TextButton(
-                            onClick = { hiddenTools = emptySet() }
-                        ) {
-                            Text("Show All Toolbar Tools")
-                        }
                     }
                 }
-            } else {
-                // Portrait Layout
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Finger Drawing toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Draw with Finger / Passive Pen", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Switch(
-                            checked = fingerDraw,
-                            onCheckedChange = { fingerDraw = it }
+
+                HorizontalDivider()
+
+                // 1. Drawing Tool Mode
+                SettingSwitchRow(
+                    title = "Draw with Finger / Passive Pen",
+                    subtitle = "When disabled, only active digital pens (S-Pen, USI) ink; fingers pan & pinch-zoom.",
+                    checked = fingerDraw,
+                    onCheckedChange = { fingerDraw = it }
+                )
+
+                // 2. Writing Hand
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Dominant Writing Hand", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Aligns spatial palm rejection zone with where your hand rests on glass.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HandSelectorButton(
+                            label = "Right-Handed",
+                            selected = dominantHand == DominantHand.RIGHT_HANDED,
+                            onClick = { dominantHand = DominantHand.RIGHT_HANDED },
+                            modifier = Modifier.weight(1f)
+                        )
+                        HandSelectorButton(
+                            label = "Left-Handed",
+                            selected = dominantHand == DominantHand.LEFT_HANDED,
+                            onClick = { dominantHand = DominantHand.LEFT_HANDED },
+                            modifier = Modifier.weight(1f)
                         )
                     }
+                }
 
-                    // Dominant Hand Selector
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Dominant Drawing Hand", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            HandSelectorButton(
-                                label = "Right-Handed",
-                                selected = dominantHand == DominantHand.RIGHT_HANDED,
-                                onClick = { dominantHand = DominantHand.RIGHT_HANDED },
-                                modifier = Modifier.weight(1f)
-                            )
-                            HandSelectorButton(
-                                label = "Left-Handed",
-                                selected = dominantHand == DominantHand.LEFT_HANDED,
-                                onClick = { dominantHand = DominantHand.LEFT_HANDED },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
+                HorizontalDivider()
 
-                    // Sliders
-                    Column {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Contact Size Threshold", fontSize = 12.sp)
-                            Text("${(touchSize * 100).toInt()}%", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Slider(value = touchSize, onValueChange = { touchSize = it }, valueRange = 0.15f..0.60f)
-                    }
+                // 3. Palm Sensitivity Sliders with Explanations
+                SettingSliderRow(
+                    title = "Contact Size Filter",
+                    subtitle = "Filters touches where contact patch exceeds this percentage. Lower values reject palms more aggressively.",
+                    displayValue = "${(touchSize * 100).toInt()}%",
+                    value = touchSize,
+                    onValueChange = { touchSize = it },
+                    valueRange = 0.15f..0.60f
+                )
 
-                    Column {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Contact Diameter Limit", fontSize = 12.sp)
-                            Text("${touchMajor.toInt()} px", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Slider(value = touchMajor, onValueChange = { touchMajor = it }, valueRange = 60f..260f)
-                    }
+                SettingSliderRow(
+                    title = "Contact Diameter Limit",
+                    subtitle = "Maximum touch ellipse diameter (px). Fingertips are ~70-130px; resting palms typically exceed 180px.",
+                    displayValue = "${touchMajor.toInt()} px",
+                    value = touchMajor,
+                    onValueChange = { touchMajor = it },
+                    valueRange = 60f..260f
+                )
 
-                    Column {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Palm Shield Bottom Zone", fontSize = 12.sp)
-                            Text("${(shieldRatio * 100).toInt()}%", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Slider(value = shieldRatio, onValueChange = { shieldRatio = it }, valueRange = 0.0f..0.45f)
-                    }
+                HorizontalDivider()
 
-                    HorizontalDivider()
+                // Smart Shape Recognition
+                SettingSwitchRow(
+                    title = "Draw-and-Hold Shape Recognition",
+                    subtitle = "Draw rough shapes (lines, arrows, circles, rectangles, triangles) and hold to snap to geometry.",
+                    checked = isShapeRecognitionEnabled,
+                    onCheckedChange = { isShapeRecognitionEnabled = it }
+                )
 
-                    // Constrain drawing to paper
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Constrain Drawing to Paper", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Text("Margin touches pan canvas; strokes clipped to edges", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Switch(
-                            checked = constrainDrawing,
-                            onCheckedChange = { constrainDrawing = it }
-                        )
-                    }
+                if (isShapeRecognitionEnabled) {
+                    SettingSliderRow(
+                        title = "Hold Snap Duration",
+                        subtitle = "Duration to pause stylus before snapping to shape.",
+                        displayValue = "${shapeHoldDurationMs.toInt()} ms",
+                        value = shapeHoldDurationMs,
+                        onValueChange = { shapeHoldDurationMs = it },
+                        valueRange = 300f..800f
+                    )
+                }
 
-                    HorizontalDivider()
+                HorizontalDivider()
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                // 4. Paper Margins & Canvas Layout
+                SettingSwitchRow(
+                    title = "Constrain Drawing to Paper",
+                    subtitle = "Clips ink to the page margins and enables panning by dragging margins outside paper.",
+                    checked = constrainDrawing,
+                    onCheckedChange = { constrainDrawing = it }
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Canvas Board Layout", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Paged A4 provides standard export pages; Infinite Board provides boundless whiteboard.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         HandSelectorButton(
                             label = "Paged (A4)",
                             selected = layoutMode == CanvasLayoutMode.PAGED,
@@ -368,26 +231,28 @@ fun CanvasSettingsDialog(
                             modifier = Modifier.weight(1f)
                         )
                     }
+                }
 
-                    HorizontalDivider()
+                HorizontalDivider()
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Toolbar Tools", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Text(
-                                if (hiddenTools.isEmpty()) "All tools are visible" else "${hiddenTools.size} tool(s) hidden",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (hiddenTools.isNotEmpty()) {
-                            TextButton(onClick = { hiddenTools = emptySet() }) {
-                                Text("Unhide All")
-                            }
+                // 5. Toolbar Tools Customization
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Toolbar Customization", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (hiddenTools.isEmpty()) "Long-press any tool icon on the palette to hide it."
+                            else "${hiddenTools.size} tool(s) hidden. Long-press on toolbar or tap to restore:",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (hiddenTools.isNotEmpty()) {
+                        TextButton(onClick = { hiddenTools = emptySet() }) {
+                            Text("Unhide All")
                         }
                     }
                 }
@@ -396,16 +261,18 @@ fun CanvasSettingsDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    state.palmConfig = PalmRejectionConfig(
+                    val updatedConfig = state.palmConfig.copy(
                         isFingerDrawingEnabled = fingerDraw,
                         touchSizeThreshold = touchSize,
                         touchMajorThresholdPx = touchMajor,
-                        palmShieldBottomRatio = shieldRatio,
-                        isPalmShieldActive = shieldRatio > 0.01f,
                         dominantHand = dominantHand,
                         constrainDrawingToPage = constrainDrawing,
+                        isShapeRecognitionEnabled = isShapeRecognitionEnabled,
+                        shapeHoldDurationMs = shapeHoldDurationMs.toLong(),
                         hiddenTools = hiddenTools
                     )
+                    state.palmConfig = updatedConfig
+                    prefManager.savePalmConfig(updatedConfig)
                     state.setLayoutMode(layoutMode)
                     onDismiss()
                 }
@@ -427,33 +294,4 @@ fun CanvasSettingsDialog(
             }
         }
     )
-}
-
-@Composable
-private fun HandSelectorButton(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .border(
-                width = if (selected) 2.dp else 1.dp,
-                color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                shape = RoundedCornerShape(10.dp)
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp, horizontal = 10.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            fontSize = 11.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
 }

@@ -126,4 +126,33 @@ object CanvasIcons {
             }
         }.build()
     }
+
+    val LassoTool: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "LassoTool",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(
+                stroke = SolidColor(Color.White),
+                strokeLineWidth = 1.8f
+            ) {
+                moveTo(14f, 4f)
+                curveTo(18.5f, 4f, 21f, 7.5f, 21f, 11f)
+                curveTo(21f, 15f, 17.5f, 18f, 12f, 18f)
+                curveTo(7.5f, 18f, 3.5f, 15f, 3.5f, 11f)
+                curveTo(3.5f, 6.5f, 7.5f, 4f, 12f, 4f)
+                curveTo(14f, 4f, 15f, 4.5f, 15f, 5f)
+            }
+            path(
+                stroke = SolidColor(Color.White),
+                strokeLineWidth = 1.8f
+            ) {
+                moveTo(12f, 18f)
+                curveTo(10f, 20f, 8f, 21.5f, 5f, 21.5f)
+            }
+        }.build()
+    }
 }

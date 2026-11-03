@@ -11,17 +11,20 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import com.scribidoo.app.canvas.ink.EraserEngine
 import com.scribidoo.app.canvas.input.PalmRejectionConfig
+import com.scribidoo.app.canvas.lasso.LassoEngine
 import com.scribidoo.app.canvas.model.AudioNoteModel
 import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.model.DocumentModel
 import com.scribidoo.app.canvas.model.DrawingTool
 import com.scribidoo.app.canvas.model.ImageModel
+import com.scribidoo.app.canvas.model.LassoSelection
 import com.scribidoo.app.canvas.model.PageModel
 import com.scribidoo.app.canvas.model.SerializablePoint
 import com.scribidoo.app.canvas.model.ShapeModel
 import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.model.StrokeModel
 import com.scribidoo.app.canvas.model.TextBoxModel
+import com.scribidoo.app.canvas.shape.ShapeMathUtils
 import com.scribidoo.app.canvas.viewport.ViewportState
 import java.io.File
 
@@ -63,6 +66,12 @@ class CanvasState(
 
     // Unified item selection
     var selectedItem by mutableStateOf<SelectedItem?>(null)
+
+    // Active Lasso in-progress loop and selected group
+    var activeLassoPath by mutableStateOf<List<Offset>>(emptyList())
+    var lassoSelection by mutableStateOf(LassoSelection.Empty)
+    var isDraggingLassoSelection by mutableStateOf(false)
+    var isScalingLassoSelection by mutableStateOf(false)
 
     var selectedTextBoxId: String?
         get() = if (selectedItem?.type == SelectableType.TEXT_BOX) selectedItem?.id else null
@@ -247,6 +256,98 @@ class CanvasState(
         }
     }
 
+    fun startLasso(canvasPoint: Offset) {
+        clearLasso()
+        activeLassoPath = listOf(canvasPoint)
+    }
+
+    fun appendLassoPoint(canvasPoint: Offset) {
+        if (activeLassoPath.isNotEmpty()) {
+            activeLassoPath = activeLassoPath + canvasPoint
+        }
+    }
+
+    fun finishLasso() {
+        if (activeLassoPath.size >= 3) {
+            val selection = LassoEngine.findSelection(currentPage, activeLassoPath)
+            lassoSelection = selection
+        }
+        activeLassoPath = emptyList()
+    }
+
+    fun clearLasso() {
+        activeLassoPath = emptyList()
+        lassoSelection = LassoSelection.Empty
+        isDraggingLassoSelection = false
+        isScalingLassoSelection = false
+    }
+
+    fun moveLassoSelection(dx: Float, dy: Float) {
+        if (lassoSelection.isEmpty || (dx == 0f && dy == 0f)) return
+        val updatedPage = LassoEngine.translate(currentPage, lassoSelection, dx, dy)
+        val updatedPages = document.pages.toMutableList()
+        updatedPages[document.activePageIndex] = updatedPage
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+        lassoSelection = lassoSelection.copy(bounds = LassoEngine.computeBounds(updatedPage, lassoSelection))
+    }
+
+    fun scaleLassoSelection(scaleFactor: Float, pivot: Offset) {
+        if (lassoSelection.isEmpty || scaleFactor <= 0.05f) return
+        val updatedPage = LassoEngine.scale(currentPage, lassoSelection, scaleFactor, pivot)
+        val updatedPages = document.pages.toMutableList()
+        updatedPages[document.activePageIndex] = updatedPage
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+        lassoSelection = lassoSelection.copy(bounds = LassoEngine.computeBounds(updatedPage, lassoSelection))
+    }
+
+    fun recolorLassoSelection(color: Color) {
+        if (lassoSelection.isEmpty) return
+        pushHistory()
+        val updatedPage = LassoEngine.recolorStrokes(currentPage, lassoSelection.strokeIds, color.toArgb())
+        val updatedPages = document.pages.toMutableList()
+        updatedPages[document.activePageIndex] = updatedPage
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+    }
+
+    fun duplicateLassoSelection() {
+        if (lassoSelection.isEmpty) return
+        pushHistory()
+        val (updatedPage, newSelection) = LassoEngine.duplicate(currentPage, lassoSelection)
+        val updatedPages = document.pages.toMutableList()
+        updatedPages[document.activePageIndex] = updatedPage
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+        lassoSelection = newSelection
+    }
+
+    fun deleteLassoSelection() {
+        if (lassoSelection.isEmpty) return
+        pushHistory()
+        val updatedPage = LassoEngine.delete(currentPage, lassoSelection)
+        val updatedPages = document.pages.toMutableList()
+        updatedPages[document.activePageIndex] = updatedPage
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+        clearLasso()
+    }
+
+    var snappedShapeBase by mutableStateOf<ShapeModel?>(null)
+        private set
+    var snappedShapeHoldOrigin by mutableStateOf<Offset?>(null)
+        private set
+
+    fun snapStrokeToShape(shape: ShapeModel, holdOrigin: Offset? = null) {
+        val stroke = activeStroke
+        if (stroke != null) {
+            val curPage = currentPage
+            val updatedPages = document.pages.toMutableList()
+            updatedPages[document.activePageIndex] = curPage.copy(strokes = curPage.strokes + stroke)
+            pushHistory()
+            activeStroke = null
+        }
+        activeShape = shape
+        snappedShapeBase = shape
+        snappedShapeHoldOrigin = holdOrigin
+    }
+
     fun startShape(canvasPoint: Offset) {
         activeShape = ShapeModel(
             type = currentShapeType,
@@ -254,19 +355,228 @@ class CanvasState(
             startY = canvasPoint.y,
             endX = canvasPoint.x,
             endY = canvasPoint.y,
+            vertexX = if (currentShapeType == ShapeType.RIGHT_ANGLE) canvasPoint.x else null,
+            vertexY = if (currentShapeType == ShapeType.RIGHT_ANGLE) canvasPoint.y else null,
             strokeColorArgb = currentColor.toArgb(),
             strokeWidth = currentStrokeWidth
         )
     }
 
-    fun updateShape(canvasPoint: Offset) {
-        val shape = activeShape ?: return
-        activeShape = shape.copy(endX = canvasPoint.x, endY = canvasPoint.y)
+    var isSnapToSquareCircleActive by mutableStateOf(false)
+        private set
+
+    fun updateShape(canvasPoint: Offset): Boolean {
+        val shape = activeShape ?: return false
+        var targetEndX = canvasPoint.x
+        var targetEndY = canvasPoint.y
+        var targetVertexX = shape.vertexX
+        var targetVertexY = shape.vertexY
+        var didSnap = false
+
+        if (shape.type == ShapeType.RECTANGLE || shape.type == ShapeType.ELLIPSE) {
+            val width = kotlin.math.abs(targetEndX - shape.startX)
+            val height = kotlin.math.abs(targetEndY - shape.startY)
+            if (width > 20f && height > 20f) {
+                val ratio = width / height
+                if (ratio in 0.86f..1.16f) {
+                    val side = (width + height) / 2f
+                    val signX = if (targetEndX >= shape.startX) 1f else -1f
+                    val signY = if (targetEndY >= shape.startY) 1f else -1f
+                    targetEndX = shape.startX + signX * side
+                    targetEndY = shape.startY + signY * side
+                    didSnap = true
+                }
+            }
+        } else if (shape.type == ShapeType.LINE || shape.type == ShapeType.ARROW) {
+            val (snappedEnd, snapped) = ShapeMathUtils.snapAngleIfClose(
+                start = Offset(shape.startX, shape.startY),
+                end = Offset(targetEndX, targetEndY),
+                thresholdRad = 0.14f
+            )
+            if (snapped) {
+                targetEndX = snappedEnd.x
+                targetEndY = snappedEnd.y
+                didSnap = true
+            }
+        } else if (shape.type == ShapeType.RIGHT_ANGLE) {
+            if (shape.vertexX != null && shape.vertexY != null) {
+                val vx = shape.vertexX
+                val vy = shape.vertexY
+                val v1x = vx - shape.startX
+                val v1y = vy - shape.startY
+                val d1 = kotlin.math.hypot(v1x, v1y)
+                if (d1 > 10f) {
+                    val u1x = v1x / d1
+                    val u1y = v1y / d1
+                    val dragX = canvasPoint.x - vx
+                    val dragY = canvasPoint.y - vy
+                    val dotA = dragX * (-u1y) + dragY * u1x
+                    val dotB = dragX * u1y + dragY * (-u1x)
+                    val perpDirX = if (dotA >= dotB) -u1y else u1y
+                    val perpDirY = if (dotA >= dotB) u1x else -u1x
+                    var len2 = kotlin.math.max(20f, kotlin.math.max(dotA, dotB))
+
+                    if (kotlin.math.abs(len2 - d1) / d1 <= 0.15f) {
+                        len2 = d1
+                        didSnap = true
+                    }
+                    targetEndX = vx + len2 * perpDirX
+                    targetEndY = vy + len2 * perpDirY
+                    targetVertexX = vx
+                    targetVertexY = vy
+                }
+            } else {
+                targetVertexX = shape.startX
+                targetVertexY = targetEndY
+                val arm1 = kotlin.math.abs(targetVertexY - shape.startY)
+                val arm2 = kotlin.math.abs(targetEndX - targetVertexX)
+                if (arm1 > 20f && arm2 > 20f && (arm1 / arm2 in 0.86f..1.16f)) {
+                    val side = (arm1 + arm2) / 2f
+                    val signY = if (targetEndY >= shape.startY) 1f else -1f
+                    val signX = if (targetEndX >= shape.startX) 1f else -1f
+                    targetVertexY = shape.startY + signY * side
+                    targetEndY = targetVertexY
+                    targetEndX = shape.startX + signX * side
+                    didSnap = true
+                }
+            }
+        }
+
+        val justSnapped = didSnap && !isSnapToSquareCircleActive
+        isSnapToSquareCircleActive = didSnap
+        activeShape = shape.copy(
+            endX = targetEndX,
+            endY = targetEndY,
+            vertexX = targetVertexX,
+            vertexY = targetVertexY
+        )
+        return justSnapped
+    }
+
+    fun adjustSnappedShape(canvasPoint: Offset): Boolean {
+        val base = snappedShapeBase ?: return updateShape(canvasPoint)
+        val origin = snappedShapeHoldOrigin ?: return updateShape(canvasPoint)
+
+        when (base.type) {
+            ShapeType.LINE, ShapeType.ARROW -> {
+                var targetEndX = canvasPoint.x
+                var targetEndY = canvasPoint.y
+                val (snappedEnd, snapped) = ShapeMathUtils.snapAngleIfClose(
+                    start = Offset(base.startX, base.startY),
+                    end = Offset(targetEndX, targetEndY),
+                    thresholdRad = 0.14f
+                )
+                if (snapped) {
+                    targetEndX = snappedEnd.x
+                    targetEndY = snappedEnd.y
+                }
+                val justSnapped = snapped && !isSnapToSquareCircleActive
+                isSnapToSquareCircleActive = snapped
+                activeShape = base.copy(endX = targetEndX, endY = targetEndY)
+                return justSnapped
+            }
+            ShapeType.RIGHT_ANGLE -> {
+                val vx = base.vertexX ?: base.startX
+                val vy = base.vertexY ?: base.endY
+                val v1x = vx - base.startX
+                val v1y = vy - base.startY
+                val d1 = kotlin.math.hypot(v1x, v1y)
+                if (d1 > 10f) {
+                    val u1x = v1x / d1
+                    val u1y = v1y / d1
+                    val dragX = canvasPoint.x - vx
+                    val dragY = canvasPoint.y - vy
+                    val dotA = dragX * (-u1y) + dragY * u1x
+                    val dotB = dragX * u1y + dragY * (-u1x)
+                    val perpDirX = if (dotA >= dotB) -u1y else u1y
+                    val perpDirY = if (dotA >= dotB) u1x else -u1x
+                    var len2 = kotlin.math.max(20f, kotlin.math.max(dotA, dotB))
+                    var didSnap = false
+                    if (kotlin.math.abs(len2 - d1) / d1 <= 0.15f) {
+                        len2 = d1
+                        didSnap = true
+                    }
+                    val justSnapped = didSnap && !isSnapToSquareCircleActive
+                    isSnapToSquareCircleActive = didSnap
+                    activeShape = base.copy(
+                        endX = vx + len2 * perpDirX,
+                        endY = vy + len2 * perpDirY,
+                        vertexX = vx,
+                        vertexY = vy
+                    )
+                    return justSnapped
+                }
+                return false
+            }
+            ShapeType.RECTANGLE, ShapeType.ELLIPSE -> {
+                val dragDist = ShapeMathUtils.distance(canvasPoint, origin)
+                if (dragDist < 16f) {
+                    activeShape = base
+                    isSnapToSquareCircleActive = false
+                    return false
+                }
+                val cx = (base.startX + base.endX) / 2f
+                val cy = (base.startY + base.endY) / 2f
+                val origW = kotlin.math.abs(base.endX - base.startX)
+                val origH = kotlin.math.abs(base.endY - base.startY)
+                val d0 = ShapeMathUtils.distance(origin, Offset(cx, cy)).coerceAtLeast(20f)
+                val dCurrent = ShapeMathUtils.distance(canvasPoint, Offset(cx, cy))
+                val scale = (dCurrent / d0).coerceIn(0.2f, 5.0f)
+                var w = origW * scale
+                var h = origH * scale
+                var didSnap = false
+                if (w > 20f && h > 20f && (w / h in 0.86f..1.16f)) {
+                    val side = (w + h) / 2f
+                    w = side
+                    h = side
+                    didSnap = true
+                }
+                val justSnapped = didSnap && !isSnapToSquareCircleActive
+                isSnapToSquareCircleActive = didSnap
+                activeShape = base.copy(
+                    startX = cx - w / 2f,
+                    startY = cy - h / 2f,
+                    endX = cx + w / 2f,
+                    endY = cy + h / 2f
+                )
+                return justSnapped
+            }
+            ShapeType.TRIANGLE -> {
+                val dragDist = ShapeMathUtils.distance(canvasPoint, origin)
+                if (dragDist < 16f) {
+                    activeShape = base
+                    return false
+                }
+                val v0 = Offset(base.startX, base.startY)
+                val v1 = Offset(base.vertexX ?: base.startX, base.vertexY ?: base.endY)
+                val v2 = Offset(base.endX, base.endY)
+                val cx = (v0.x + v1.x + v2.x) / 3f
+                val cy = (v0.y + v1.y + v2.y) / 3f
+                val d0 = ShapeMathUtils.distance(origin, Offset(cx, cy)).coerceAtLeast(20f)
+                val dCurrent = ShapeMathUtils.distance(canvasPoint, Offset(cx, cy))
+                val scale = (dCurrent / d0).coerceIn(0.2f, 5.0f)
+                val newV0 = Offset(cx + (v0.x - cx) * scale, cy + (v0.y - cy) * scale)
+                val newV1 = Offset(cx + (v1.x - cx) * scale, cy + (v1.y - cy) * scale)
+                val newV2 = Offset(cx + (v2.x - cx) * scale, cy + (v2.y - cy) * scale)
+                activeShape = base.copy(
+                    startX = newV0.x,
+                    startY = newV0.y,
+                    vertexX = newV1.x,
+                    vertexY = newV1.y,
+                    endX = newV2.x,
+                    endY = newV2.y
+                )
+                return false
+            }
+        }
     }
 
     fun finishShape() {
         val shape = activeShape ?: return
         activeShape = null
+        snappedShapeBase = null
+        snappedShapeHoldOrigin = null
+        isSnapToSquareCircleActive = false
         pushHistory()
         val curPage = currentPage
         val updatedPages = document.pages.toMutableList()
@@ -412,6 +722,46 @@ class CanvasState(
         document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
     }
 
+    fun rotateImage(id: String, degrees: Float) {
+        val curPage = currentPage
+        val updatedPages = document.pages.toMutableList()
+        val normalized = (degrees % 360f + 360f) % 360f
+        val updatedImages = curPage.images.map {
+            if (it.id == id) it.copy(rotationDegrees = normalized) else it
+        }
+        updatedPages[document.activePageIndex] = curPage.copy(images = updatedImages)
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+    }
+
+    fun rotateImageBy(id: String, deltaDegrees: Float) {
+        val curPage = currentPage
+        val img = curPage.images.firstOrNull { it.id == id } ?: return
+        rotateImage(id, img.rotationDegrees + deltaDegrees)
+    }
+
+    fun cycleImageOpacity(id: String) {
+        val curPage = currentPage
+        val img = curPage.images.firstOrNull { it.id == id } ?: return
+        val nextOpacity = when {
+            img.opacity >= 0.95f -> 0.75f
+            img.opacity >= 0.70f -> 0.50f
+            img.opacity >= 0.45f -> 0.25f
+            else -> 1.0f
+        }
+        setImageOpacity(id, nextOpacity)
+    }
+
+    fun setImageOpacity(id: String, opacity: Float) {
+        val curPage = currentPage
+        val updatedPages = document.pages.toMutableList()
+        val clamped = opacity.coerceIn(0.1f, 1.0f)
+        val updatedImages = curPage.images.map {
+            if (it.id == id) it.copy(opacity = clamped) else it
+        }
+        updatedPages[document.activePageIndex] = curPage.copy(images = updatedImages)
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
+    }
+
     // --- Audio Note Operations ---
     fun addAudioNote(
         localPath: String,
@@ -422,6 +772,23 @@ class CanvasState(
         pushHistory()
         val curPage = currentPage
         val updatedPages = document.pages.toMutableList()
+
+        val existingLabels = document.pages.flatMap { p -> p.audioNotes.map { it.label } }
+        val resolvedTitle = if (title == "Voice Note" || title.isBlank()) {
+            val regex = Regex("""^Voice Note(?: (\d+))?$""")
+            var maxIndex = 0
+            for (lbl in existingLabels) {
+                val match = regex.matchEntire(lbl.trim())
+                if (match != null) {
+                    val n = match.groupValues.getOrNull(1)?.toIntOrNull() ?: 1
+                    if (n > maxIndex) maxIndex = n
+                }
+            }
+            "Voice Note ${maxIndex + 1}"
+        } else {
+            title
+        }
+
         val newAudio = AudioNoteModel(
             localPath = localPath,
             x = center.x,
@@ -429,11 +796,26 @@ class CanvasState(
             durationMs = durationMs,
             trimStartMs = 0L,
             trimEndMs = durationMs,
-            label = title
+            label = resolvedTitle
         )
         updatedPages[document.activePageIndex] = curPage.copy(audioNotes = curPage.audioNotes + newAudio)
         document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
         selectedItem = SelectedItem(newAudio.id, SelectableType.AUDIO_NOTE)
+    }
+
+    fun resizeAudioNote(id: String, newWidth: Float, newHeight: Float) {
+        val curPage = currentPage
+        val updatedPages = document.pages.toMutableList()
+        val updatedAudio = curPage.audioNotes.map { audio ->
+            if (audio.id == id) {
+                audio.copy(
+                    width = newWidth.coerceIn(100f, 600f),
+                    height = newHeight.coerceIn(36f, 160f)
+                )
+            } else audio
+        }
+        updatedPages[document.activePageIndex] = curPage.copy(audioNotes = updatedAudio)
+        document = document.copy(pages = updatedPages, modifiedAt = System.currentTimeMillis())
     }
 
     fun deleteAudioNote(id: String) {

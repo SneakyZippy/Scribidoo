@@ -107,7 +107,6 @@ fun CanvasWorkspaceScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
-    var showBrandStickerDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
 
     // Launcher for PDF file selection
@@ -234,17 +233,22 @@ fun CanvasWorkspaceScreen(
 
     // Load document on launch (specific document if requested, else blank/new document)
     LaunchedEffect(documentId) {
+        state.palmConfig = com.scribidoo.app.preference.UserPreferencesManager(context).loadPalmConfig()
         if (documentId != null) {
             val doc = storageManager.loadDocument(documentId)
             if (doc != null) {
                 state.loadDocument(doc)
             } else {
-                val newDoc = DocumentModel(id = documentId)
+                val allDocs = storageManager.listDocuments()
+                val uniqueTitle = com.scribidoo.app.util.UniqueNamingUtils.generateUniqueDocumentTitle(allDocs.map { it.title })
+                val newDoc = DocumentModel(id = documentId, title = uniqueTitle)
                 state.loadDocument(newDoc)
                 storageManager.saveDocument(newDoc)
             }
         } else {
-            val newDoc = DocumentModel()
+            val allDocs = storageManager.listDocuments()
+            val uniqueTitle = com.scribidoo.app.util.UniqueNamingUtils.generateUniqueDocumentTitle(allDocs.map { it.title })
+            val newDoc = DocumentModel(title = uniqueTitle)
             state.loadDocument(newDoc)
             storageManager.saveDocument(newDoc)
         }
@@ -697,21 +701,10 @@ fun CanvasWorkspaceScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Choose how to add an image or sticker to your canvas:",
+                        text = "Choose how to add an image to your canvas:",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Button(
-                        onClick = {
-                            state.showImageSourceDialog = false
-                            showBrandStickerDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Scribidoo Brand Stickers & Art")
-                    }
                     Button(
                         onClick = {
                             state.showImageSourceDialog = false
@@ -750,22 +743,6 @@ fun CanvasWorkspaceScreen(
                 TextButton(onClick = { state.showImageSourceDialog = false }) {
                     Text("Cancel")
                 }
-            }
-        )
-    }
-
-    // Scribidoo Brand Art & Sticker Gallery Dialog
-    if (showBrandStickerDialog) {
-        BrandStickerGalleryDialog(
-            onDismiss = { showBrandStickerDialog = false },
-            onSelectSticker = { resId, defaultW, defaultH, label ->
-                val file = copyDrawableToFile(context, resId, "sticker_${resId}.png")
-                val center = state.viewportState.screenToCanvas(
-                    Offset(state.viewportState.containerSize.width / 2f, state.viewportState.containerSize.height / 2f)
-                )
-                state.addImage(file.absolutePath, defaultW, defaultH, center)
-                Toast.makeText(context, "Added $label sticker", Toast.LENGTH_SHORT).show()
-                showBrandStickerDialog = false
             }
         )
     }
@@ -906,109 +883,6 @@ fun TextBoxDialog(
                 TextButton(onClick = onDismiss) {
                     Text("Cancel")
                 }
-            }
-        }
-    )
-}
-
-private fun copyDrawableToFile(context: android.content.Context, resId: Int, fileName: String): File {
-    val dir = File(context.filesDir, "branding").apply { mkdirs() }
-    val outFile = File(dir, fileName)
-    if (!outFile.exists() || outFile.length() == 0L) {
-        val bitmap = android.graphics.BitmapFactory.decodeResource(context.resources, resId)
-        java.io.FileOutputStream(outFile).use { out ->
-            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
-        }
-    }
-    return outFile
-}
-
-private data class StickerItem(
-    val resId: Int,
-    val label: String,
-    val defaultW: Float,
-    val defaultH: Float
-)
-
-@Composable
-fun BrandStickerGalleryDialog(
-    onDismiss: () -> Unit,
-    onSelectSticker: (resId: Int, defaultW: Float, defaultH: Float, label: String) -> Unit
-) {
-    val stickers = remember {
-        listOf(
-            StickerItem(R.drawable.scribidoo_logo_watercolor, "Watercolor Crest", 400f, 420f),
-            StickerItem(R.drawable.scribidoo_brand_icon, "Brand Icon & Stars", 350f, 390f),
-            StickerItem(R.drawable.scribidoo_logotype, "Script Logotype", 440f, 330f),
-            StickerItem(R.drawable.scribidoo_badge, "Monogram Badge", 320f, 320f)
-        )
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text("Scribidoo Stickers & Art", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "Tap any brand sticker to place it on your canvas (movable & resizable):",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                    columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.height(280.dp)
-                ) {
-                    items(stickers.size) { index ->
-                        val item = stickers[index]
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFFEFAF7),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x1F000000)),
-                            modifier = Modifier
-                                .clickable { onSelectSticker(item.resId, item.defaultW, item.defaultH, item.label) }
-                                .padding(2.dp)
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                                modifier = Modifier.padding(8.dp)
-                            ) {
-                                Image(
-                                    painter = painterResource(id = item.resId),
-                                    contentDescription = item.label,
-                                    modifier = Modifier
-                                        .size(76.dp)
-                                        .padding(4.dp),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = item.label,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xDD000000),
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
             }
         }
     )

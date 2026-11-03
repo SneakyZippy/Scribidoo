@@ -71,6 +71,7 @@ import com.scribidoo.app.canvas.model.CanvasLayoutMode
 import com.scribidoo.app.canvas.model.DrawingTool
 import com.scribidoo.app.canvas.model.ShapeType
 import com.scribidoo.app.canvas.state.CanvasState
+import com.scribidoo.app.canvas.ui.CanvasIcons
 import kotlin.math.roundToInt
 
 enum class ToolbarOrientation {
@@ -158,6 +159,7 @@ fun FloatingToolPalette(
                     PenTool(state)
                     HighlighterTool(state)
                     EraserTool(state)
+                    LassoTool(state)
                     ShapeTool(
                         state = state,
                         showShapeMenu = showShapeMenu,
@@ -254,28 +256,23 @@ fun FloatingToolPalette(
                         HighlighterTool(state)
                     }
 
-                    // Row 3: Eraser + Shapes
+                    // Row 3: Eraser + Lasso
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         EraserTool(state)
+                        LassoTool(state)
+                    }
+
+                    // Row 4: Shape + Text
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         ShapeTool(
                             state = state,
                             showShapeMenu = showShapeMenu,
                             onShowShapeMenuChange = { showShapeMenu = it }
                         )
-                    }
-
-                    // Row 4: Text + Color
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
                         TextTool(state)
-                        ColorTool(
-                            state = state,
-                            presetColors = presetColors,
-                            showColorMenu = showColorMenu,
-                            onShowColorMenuChange = { showColorMenu = it }
-                        )
                     }
 
                     // Row 5: Picture + Audio Note
@@ -294,22 +291,38 @@ fun FloatingToolPalette(
                             .background(Color(0x1F000000))
                     )
 
-                    // Row 6: Width + Finger Toggle
+                    // Row 6: Color + Width
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        ColorTool(
+                            state = state,
+                            presetColors = presetColors,
+                            showColorMenu = showColorMenu,
+                            onShowColorMenuChange = { showColorMenu = it }
+                        )
                         WidthTool(
                             state = state,
                             showWidthMenu = showWidthMenu,
                             onShowWidthMenuChange = { showWidthMenu = it }
                         )
-                        FingerTool(state)
                     }
 
-                    // Row 7: Undo + Redo
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Row 7: Finger Toggle + Undo
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FingerTool(state)
                         UndoTool(state)
+                    }
+
+                    // Row 8: Redo
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         RedoTool(state)
                     }
 
@@ -633,8 +646,36 @@ private fun ShapeTool(
                     onShowShapeMenuChange(false)
                 }
             )
+            DropdownMenuItem(
+                text = { Text("Triangle") },
+                onClick = {
+                    state.currentShapeType = ShapeType.TRIANGLE
+                    state.currentTool = DrawingTool.SHAPE
+                    onShowShapeMenuChange(false)
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Right Angle (90°)") },
+                onClick = {
+                    state.currentShapeType = ShapeType.RIGHT_ANGLE
+                    state.currentTool = DrawingTool.SHAPE
+                    onShowShapeMenuChange(false)
+                }
+            )
         }
     }
+}
+
+@Composable
+private fun LassoTool(state: CanvasState) {
+    HideableToolButton(
+        tool = DrawingTool.LASSO,
+        icon = CanvasIcons.LassoTool,
+        label = "Lasso",
+        isSelected = state.currentTool == DrawingTool.LASSO,
+        state = state,
+        onClick = { state.currentTool = DrawingTool.LASSO }
+    )
 }
 
 @Composable

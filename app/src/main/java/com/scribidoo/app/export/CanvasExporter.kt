@@ -241,6 +241,36 @@ class CanvasExporter(private val context: Context) {
                     val bottom = maxOf(shape.startY, shape.endY)
                     canvas.drawOval(left, top, right, bottom, paint)
                 }
+                ShapeType.TRIANGLE -> {
+                    val triPath = Path().apply {
+                        if (shape.vertexX != null && shape.vertexY != null) {
+                            moveTo(shape.startX, shape.startY)
+                            lineTo(shape.vertexX, shape.vertexY)
+                            lineTo(shape.endX, shape.endY)
+                            close()
+                        } else {
+                            val left = minOf(shape.startX, shape.endX)
+                            val top = minOf(shape.startY, shape.endY)
+                            val right = maxOf(shape.startX, shape.endX)
+                            val bottom = maxOf(shape.startY, shape.endY)
+                            moveTo((left + right) / 2f, top)
+                            lineTo(right, bottom)
+                            lineTo(left, bottom)
+                            close()
+                        }
+                    }
+                    canvas.drawPath(triPath, paint)
+                }
+                ShapeType.RIGHT_ANGLE -> {
+                    val vertexX = shape.vertexX ?: shape.startX
+                    val vertexY = shape.vertexY ?: shape.endY
+                    val anglePath = Path().apply {
+                        moveTo(shape.startX, shape.startY)
+                        lineTo(vertexX, vertexY)
+                        lineTo(shape.endX, shape.endY)
+                    }
+                    canvas.drawPath(anglePath, paint)
+                }
             }
         }
     }
@@ -252,7 +282,21 @@ class CanvasExporter(private val context: Context) {
                 val bmp = android.graphics.BitmapFactory.decodeFile(img.localPath)
                 if (bmp != null) {
                     val destRect = android.graphics.RectF(img.x, img.y, img.x + img.width, img.y + img.height)
-                    canvas.drawBitmap(bmp, null, destRect, null)
+                    val paint = if (img.opacity < 0.99f) {
+                        Paint().apply {
+                            alpha = (img.opacity.coerceIn(0.05f, 1.0f) * 255).toInt()
+                        }
+                    } else null
+                    if (img.rotationDegrees != 0f) {
+                        val cx = img.x + img.width / 2f
+                        val cy = img.y + img.height / 2f
+                        canvas.save()
+                        canvas.rotate(img.rotationDegrees, cx, cy)
+                        canvas.drawBitmap(bmp, null, destRect, paint)
+                        canvas.restore()
+                    } else {
+                        canvas.drawBitmap(bmp, null, destRect, paint)
+                    }
                 }
             }
         }
